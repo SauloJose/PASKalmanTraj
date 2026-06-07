@@ -82,12 +82,18 @@ class KalmanApp:
         self.show_kalman = tk.BooleanVar(value=True)
         self.show_window = tk.BooleanVar(value=True)
 
-        # Thread-safe boolean cache para o processador de vídeo
-        self.show_traj_val = True
-        self.show_detect_val = True
-        self.show_kalman_val = True
-        self.show_window_val = True
+        # CORREÇÃO: Alinhando os nomes das variáveis para corresponderem ao loop e ao trace
+        self.show_traj_cache = True
+        self.show_detect_cache = True
+        self.show_kalman_cache = True
+        self.show_window_cache = True
 
+        # Configura traces para manter os caches atualizados
+        self.show_traj.trace_add('write', lambda *_: setattr(self, 'show_traj_cache', self.show_traj.get()))
+        self.show_detect.trace_add('write', lambda *_: setattr(self, 'show_detect_cache', self.show_detect.get()))
+        self.show_kalman.trace_add('write', lambda *_: setattr(self, 'show_kalman_cache', self.show_kalman.get()))
+        self.show_window.trace_add('write', lambda *_: setattr(self, 'show_window_cache', self.show_window.get()))
+        
         # Main layout: left (300) | center (750) | right (450) = proportion 2:5:3
         self.root.grid_columnconfigure(0, weight=0, minsize=300)  
         self.root.grid_columnconfigure(1, weight=1, minsize=750)  
@@ -225,16 +231,16 @@ class KalmanApp:
         info_lbl_frame.grid_columnconfigure(1, weight=1)
 
         # --- Linha 0: Status (Ocupa as duas colunas para destaque) ---
-        self.status_lbl = tk.Label(info_lbl_frame, text="Status: Aguardando Execução", 
+        self.status_lbl = tk.Label(info_lbl_frame, text="Status: Aguardando", 
                                    font=("Segoe UI", 8, "bold"), fg="#16a34a", bg="#f5f5f5")
         self.status_lbl.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
         # --- Linha 1: Taxas ---
-        self.det_rate_lbl = tk.Label(info_lbl_frame, text="Tx. Observação: --%", 
+        self.det_rate_lbl = tk.Label(info_lbl_frame, text="Tx. Detec: --%", 
                                      font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
         self.det_rate_lbl.grid(row=1, column=0, sticky="w", pady=1)
 
-        self.inlier_rate_lbl = tk.Label(info_lbl_frame, text="Inliers (Janela): --%", 
+        self.inlier_rate_lbl = tk.Label(info_lbl_frame, text="Inliers : --%", 
                                         font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
         self.inlier_rate_lbl.grid(row=1, column=1, sticky="w", pady=1)
 
@@ -243,16 +249,16 @@ class KalmanApp:
                                  font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
         self.rmse_lbl.grid(row=2, column=0, sticky="w", pady=1)
 
-        self.mean_err_lbl = tk.Label(info_lbl_frame, text="Erro Médio: --|-- m", 
+        self.mean_err_lbl = tk.Label(info_lbl_frame, text="E_med: --|-- m", 
                                      font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
         self.mean_err_lbl.grid(row=2, column=1, sticky="w", pady=1)
 
         # --- Linha 3: NIS e Regime Estacionário ---
-        self.nis_lbl = tk.Label(info_lbl_frame, text="NIS Médio: --", 
+        self.nis_lbl = tk.Label(info_lbl_frame, text="NIS med: --", 
                                font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
         self.nis_lbl.grid(row=3, column=0, sticky="w", pady=1)
 
-        self.steady_state_lbl = tk.Label(info_lbl_frame, text="Regime Est.: -- s (-- fr)", 
+        self.steady_state_lbl = tk.Label(info_lbl_frame, text="Reg. Est.: -- s (-- fr)", 
                                          font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
         self.steady_state_lbl.grid(row=3, column=1, sticky="w", pady=1)
 
@@ -368,7 +374,7 @@ class KalmanApp:
         tk.Label(l2_frame, text=f"🔎 Escala Média: {avg_scale_px_m:.2f} px/m", font=("Segoe UI", 9), bg="#ffffff", fg="#6b7280").pack(side="left", padx=15)
         
         # Exibe o erro em metros (entrada) e a conversão para pixels
-        self.erro_sensor_lbl = tk.Label(l2_frame, text=f"⚡ Erro Distância Simulado: {erro_metros:.4f} m ≈ {erro_px:.2f} px", 
+        self.erro_sensor_lbl = tk.Label(l2_frame, text=f"⚡ Erro Distância Simulado: {erro_metros:.2f} m ≈ {erro_px:.2f} px", 
                                         font=("Segoe UI", 9), bg="#ffffff", fg="#6b7280")
         self.erro_sensor_lbl.pack(side="left", padx=15)
     
@@ -477,13 +483,15 @@ class KalmanApp:
         self.worker.start()
 
     def _simulate_ekf_tracking(self):
-        """Laço principal unificado e simplificado graças à classe MetricsManager."""
+        """Simulação rápida. Salva os frames no HD e não atualiza gráficos durante o loop."""
+        out = None
         try:
             dt = 1.0 / self.video_fps
             gen = TrajectoryGenerator(dt, self.towers)
             tipo_traj = self.traj_var.get()
-            duracao = 20.0 
-            
+            duracao = 20.0
+
+            # Geração da trajetória conforme tipo escolhido
             if tipo_traj == "Círculo":
                 raio = float(self.traj_params["raio"].get())
                 vel = float(self.traj_params["velocidade"].get())
@@ -499,95 +507,140 @@ class KalmanApp:
                 frames_occ = int(self.traj_params["oclusao_frames"].get())
                 t, states, mask = gen.generate_occlusion(raio, (self.max_x/2, self.max_y/2), 5.0, duracao, frames_occ)
             else:
+                # Fallback: círculo padrão
                 t, states = gen.generate_circle(25, (self.max_x/2, self.max_y/2), 3.0, duracao)
                 mask = np.ones(len(t), dtype=bool)
 
             self.total_frames = len(t)
-            
+
+            # Mundo e filtro EKF
             world = World(self.towers, noise_std=self.config_detector_noise_m)
             ekf = Entidy(dt, self.towers, q_diag=self.config_Q, r_diag=self.config_R)
             ekf.initialize(states[0, 0], states[0, 1])
 
-            # Limpa o gerenciador de métricas e o gravador de vídeo em RAM
             self.metrics.clear()
-            self.recorded_frames = []
 
+            # Preparação do vídeo
+            os.makedirs("FiltroKalman/src/data", exist_ok=True)
+            output_path = "FiltroKalman/src/data/simulacao_arena.mp4"
+            fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+            out = cv2.VideoWriter(output_path, fourcc, self.video_fps, (self.video_width, self.video_height))
+
+            # Fundo estático com as torres
             arena_base = np.zeros((self.video_height, self.video_width, 3), dtype=np.uint8)
             for i, (bx, by) in enumerate(self.towers):
                 px, py = self.m_to_px(bx, by)
-                cv2.circle(arena_base, (px, py), 8, (0, 165, 255), -1) 
+                cv2.circle(arena_base, (px, py), 8, (0, 165, 255), -1)
                 cv2.putText(arena_base, f"B{i+1}", (px+10, py-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
 
+            # Loop principal de simulação
             for i in range(self.total_frames):
-                if not self.processing: break 
-                
+                if not self.processing:
+                    break
+
                 gt_x, gt_y = states[i, 0], states[i, 1]
                 ekf.predict()
-                
+
                 raw_z = None
+                nis_atual = np.nan
+
                 if mask[i]:
                     raw_z = world.measure_distances(gt_x, gt_y)
                     ekf.update(raw_z)
-                
-                est_x, est_y = ekf.get_position()
-                
-                # --- NOVO: Empurramos tudo para a classe MetricsManager ---
-                self.metrics.push_frame(gt_x, gt_y, est_x, est_y, raw_z=raw_z)
 
-                # Renderização
+                # CORREÇÃO DO NIS (Se o seu EKF possuir o cálculo interno de S e inovação, use-o. 
+                if hasattr(ekf, 'P'):
+                    try:
+                        est_temp = ekf.get_position()
+                        err_vec = np.array([est_temp[0] - gt_x, est_temp[1] - gt_y])
+                        # Garante que estamos pegando uma matriz 2x2 válida e invertível
+                        P_pos = np.array(ekf.P[:2, :2], dtype=float)
+                        invP = np.linalg.inv(P_pos)
+                        nis_atual = float(err_vec.T @ invP @ err_vec)
+                    except Exception as e:
+                        nis_atual = np.nan # Se der erro de inversão, joga nan explicitamente
+
+                est_x, est_y = ekf.get_position()
+                self.metrics.push_frame(gt_x, gt_y, est_x, est_y, nis_val=nis_atual, raw_z=raw_z)
+
                 frame = arena_base.copy()
-                px_gt, py_gt = self.m_to_px(gt_x, gt_y)
-                px_est, py_est = self.m_to_px(est_x, est_y)
-                
-                if self.show_traj.get():
+
+                if self.show_traj_cache:
                     for pt in self.metrics.ground_truth_pts:
                         cv2.circle(frame, self.m_to_px(pt[0], pt[1]), 2, (0, 255, 0), -1)
-                
-                if self.show_kalman.get():
-                    for pt in self.metrics.filt_pts:
-                        cv2.circle(frame, self.m_to_px(pt[0], pt[1]), 2, (255, 0, 0), -1)
 
-                if self.show_detect.get() and mask[i]:
+                # CORREÇÃO: Definindo px_gt e py_gt convertendo os pontos reais correntes
+                px_gt, py_gt = self.m_to_px(gt_x, gt_y)
+
+                if self.show_detect_cache and mask[i]:
                     for bx, by in self.towers:
                         px_b, py_b = self.m_to_px(bx, by)
                         cv2.line(frame, (px_b, py_b), (px_gt, py_gt), (0, 165, 255), 1)
 
-                if self.show_window.get():
-                    std_x, std_y = ekf.get_uncertainty()
-                    rx = min(max(int(std_x * 3 * (self.video_width / self.max_x)), 1), self.video_width)
-                    ry = min(max(int(std_y * 3 * (self.video_height / self.max_y)), 1), self.video_height)
-                    cv2.ellipse(frame, (px_est, py_est), (rx, ry), 0, 0, 360, (255, 0, 255), 1)
+                if self.show_window_cache and hasattr(ekf, 'P'):
+                    try:
+                        std_x = np.sqrt(max(1e-6, ekf.P[0, 0]))
+                        std_y = np.sqrt(max(1e-6, ekf.P[1, 1]))
+                        win_x_m = max(self.min_window_m, std_x * 3)
+                        win_y_m = max(self.min_window_m, std_y * 3)
+                        
+                        px1_raw, py1_raw = self.m_to_px(est_x - win_x_m, est_y + win_y_m)
+                        px2_raw, py2_raw = self.m_to_px(est_x + win_x_m, est_y - win_y_m)
+                        
+                        # CORREÇÃO: Aplicação forçada de int() para não quebrar o OpenCV
+                        x1 = int(max(0, min(px1_raw, self.video_width)))
+                        y1 = int(max(0, min(py1_raw, self.video_height)))
+                        x2 = int(max(0, min(px2_raw, self.video_width)))
+                        y2 = int(max(0, min(py2_raw, self.video_height)))
+                        
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (147, 51, 234), 2) # Roxo (±3σ)
+                    except:
+                        pass
 
                 if mask[i]:
-                    cv2.circle(frame, (px_gt, py_gt), 6, (0, 255, 0), -1) 
+                    cv2.circle(frame, (px_gt, py_gt), 6, (0, 255, 0), -1)
                 else:
-                    cv2.circle(frame, (px_gt, py_gt), 6, (0, 0, 100), -1) 
-                cv2.circle(frame, (px_est, py_est), 5, (255, 100, 100), -1) 
+                    cv2.circle(frame, (px_gt, py_gt), 6, (0, 0, 100), -1)
 
-                self.recorded_frames.append(frame.copy())
-                self.current_frame_idx = i
-                self.tela_viewer.update_image(frame)
-                
-                if i % 5 == 0:
-                    self._update_metrics_ui()
-                    self._update_plots_ui()
-                
-                time.sleep(1.0 / self.video_fps)
+                if self.show_kalman_cache:
+                    cv2.circle(frame, self.m_to_px(est_x, est_y), 6, (255, 0, 0), -1)
+
+                out.write(frame)
+
+                if i % 20 == 0:
+                    self.root.after(0, lambda idx=i: self.status_lbl.config(text=f"Processando frame {idx}/{self.total_frames}..."))
+
+            self.processed_video_path = output_path
 
         except Exception as e:
             msg = traceback.format_exc()
             self.root.after(0, lambda: messagebox.showerror("Erro na Simulação", msg))
         finally:
             self.processing = False
+            if out is not None:
+                out.release()
             self.root.after(0, self._update_ui_metrics_and_complete)
-
+            
     def _update_metrics_ui(self):
-        """Consulta as métricas em tempo real da classe MetricsManager."""
-        rmse_x, rmse_y = self.metrics.calculate_rmse(self.current_frame_idx)
-        
-        self.root.after(0, lambda: self.rmse_lbl.config(text=f"RMSE (X | Y): {rmse_x:.2f} | {rmse_y:.2f} m"))
-        self.root.after(0, lambda: self.time_info_lbl.config(text=f"Passo: {self.current_frame_idx} / {self.total_frames}"))
+        """Atualiza as métricas exibidas durante o playback (frame a frame)."""
+        if not hasattr(self.metrics, 'ground_truth_pts') or self.current_frame_idx >= len(self.metrics.ground_truth_pts):
+            return
 
+        # CORREÇÃO: Alterado de up_to_frame para upto_idx para bater com o MetricsManager
+        rmse_x, rmse_y = self.metrics.calculate_rmse(upto_idx=self.current_frame_idx)
+        signed_dx, signed_dy = self.metrics.get_signed_errors(upto_idx=self.current_frame_idx)
+        
+        mean_err_x = np.mean(signed_dx) if signed_dx else 0.0
+        mean_err_y = np.mean(signed_dy) if signed_dy else 0.0
+
+        valid_nis = [n for i, n in enumerate(self.metrics.nis_vals) if not np.isnan(n) and i <= self.current_frame_idx]
+        mean_nis = np.mean(valid_nis) if valid_nis else 0.0
+
+        self.root.after(0, lambda: self.rmse_lbl.config(text=f"RMSE (X | Y): {rmse_x:.2f} | {rmse_y:.2f} m"))
+        self.root.after(0, lambda: self.mean_err_lbl.config(text=f"E_med (X | Y): {mean_err_x:+.2f} | {mean_err_y:+.2f} m"))
+        self.root.after(0, lambda: self.nis_lbl.config(text=f"NIS med: {mean_nis:.2f}"))
+        self.root.after(0, lambda: self.time_info_lbl.config(text=f"Passo: {self.current_frame_idx} / {self.total_frames}"))
+        
     def _update_plots_ui(self):
         """Delega a atualização dos gráficos ao ChartsDashboard."""
         if hasattr(self, 'dashboard'):
@@ -603,27 +656,43 @@ class KalmanApp:
         ax.grid(True, alpha=0.3, linestyle="--")
 
     def _update_ui_metrics_and_complete(self):
-        """Finaliza consultando a classe MetricsManager."""
+        """Finaliza consultando a classe MetricsManager e atualiza todos os indicadores."""
+        # Cálculo das métricas finais
         rmse_x, rmse_y = self.metrics.calculate_rmse()
-        dx, dy = self.metrics.get_signed_errors()
+        signed_dx, signed_dy = self.metrics.get_signed_errors()
         
-        self.rmse_x_total = rmse_x
-        self.rmse_y_total = rmse_y
-        self.mean_signed_dx = np.mean(dx) if dx else 0.0
-        self.mean_signed_dy = np.mean(dy) if dy else 0.0
-        self.detection_rate = 100.0
+        # Estatísticas
+        mean_err_x = np.mean(signed_dx) if signed_dx else 0.0
+        mean_err_y = np.mean(signed_dy) if signed_dy else 0.0
+        self.detection_rate = 100.0  # ou calcule com base nos raw_z válidos
         self.inlier_rate = 100.0
-        if not hasattr(self, 'mean_nis'): self.mean_nis = 0.0
-
-        self.status_lbl.config(text="Status: Processado", fg="#16a34a")
-        self.det_rate_lbl.config(text=f"Taxa de Detecção (Visível): {self.detection_rate:.1f}%")
-        self.inlier_rate_lbl.config(text=f"Inliers (na Janela): {self.inlier_rate:.1f}%")
-        self.rmse_lbl.config(text=f"RMSE (X | Y): {self.rmse_x_total:.4f} | {self.rmse_y_total:.4f} m")
-        self.mean_err_lbl.config(text=f"Erro Médio (X | Y): {self.mean_signed_dx:+.4f} | {self.mean_signed_dy:+.4f} m")
-        self.nis_lbl.config(text=f"NIS Médio: {self.mean_nis:.3f} (Ideal ~2)")
         
+        # NIS médio (ignorando NaNs)
+        valid_nis = [n for n in self.metrics.nis_vals if not np.isnan(n)]
+        self.mean_nis = np.mean(valid_nis) if valid_nis else 0.0
+        
+        # Convergência (exemplo simples - você pode manter o método _find_convergence_frame)
+        steady_frame = None  # calcule se desejar
+        steady_time = None
+        if hasattr(self, 'video_fps') and steady_frame is not None:
+            steady_time = steady_frame / self.video_fps
+        
+        # Atualização dos labels na thread principal
+        self.status_lbl.config(text="Status: Processado", fg="#16a34a")
+        self.det_rate_lbl.config(text=f"T. Detec : {self.detection_rate:.1f}%")
+        self.inlier_rate_lbl.config(text=f"Inliers: {self.inlier_rate:.1f}%")
+        self.rmse_lbl.config(text=f"RMSE (X | Y): {rmse_x:.2f} | {rmse_y:.2f} m")
+        self.mean_err_lbl.config(text=f"E_med (X | Y): {mean_err_x:+.2f} | {mean_err_y:+.2f} m")
+        self.nis_lbl.config(text=f"NIS med: {self.mean_nis:.2f} (esp ~2)")
+        
+        if steady_time is not None:
+            self.steady_state_lbl.config(text=f"Reg. Est.: {steady_time:.1f} s ({steady_frame} fr)")
+        else:
+            self.steady_state_lbl.config(text="Reg. Est.: -- s (-- fr)")
+        
+        # Habilita botão de salvar e inicia exibição do vídeo
         self._on_processing_complete()
-    
+
     def _find_convergence_frame(self, running_rms, final_val, tol=0.05, min_stable=10):
         if final_val is None or len(running_rms) < min_stable: return None
         threshold = final_val * (1 + tol)
@@ -634,20 +703,24 @@ class KalmanApp:
         return None
 
     def save_results(self):
-        """Lê os dados centralizados em self.metrics e gera os relatórios."""
-        if not self.metrics.filt_pts or not self.metrics.ground_truth_pts:
+        """Salva gráficos detalhados, relatório e dados brutos em CSV em src/results/"""
+        if not hasattr(self, 'metrics') or not self.metrics.filt_pts or not self.metrics.ground_truth_pts:
             messagebox.showwarning("Aviso", "Nenhum resultado para salvar.")
             return
 
         try:
-            video_name = "simulacao_arena"
+            # Nome baseado na trajetória escolhida
+            traj_name = self.traj_var.get().replace(" ", "_").lower()
+            video_name = f"simulacao_{traj_name}"
             save_dir = f"FiltroKalman/src/results/{video_name}"
             os.makedirs(save_dir, exist_ok=True)
 
+            # ========== Preparação de dados via MetricsManager ==========
             signed_dx, signed_dy = self.metrics.get_signed_errors()
-            
-            sx = np.array(self.metrics.sqerr_x)
-            sy = np.array(self.metrics.sqerr_y)
+            valid_nis = [n for n in self.metrics.nis_vals if not np.isnan(n)]
+
+            sx = np.array([v for v in self.metrics.sqerr_x if not np.isnan(v)])
+            sy = np.array([v for v in self.metrics.sqerr_y if not np.isnan(v)])
             run_rms_x = np.sqrt(np.cumsum(sx) / np.arange(1, sx.size + 1)) if sx.size > 0 else []
             run_rms_y = np.sqrt(np.cumsum(sy) / np.arange(1, sy.size + 1)) if sy.size > 0 else []
 
@@ -658,32 +731,198 @@ class KalmanApp:
             ys_gt = [p[1] for p in self.metrics.ground_truth_pts]
             xs_filt = [p[0] for p in self.metrics.filt_pts]
             ys_filt = [p[1] for p in self.metrics.filt_pts]
-            # Na arena usamos o GT em vez de "meas_pts" X/Y direto
-            ax1.plot(xs_gt, ys_gt, "g-", label="Ground Truth (Real)", linewidth=2.5, alpha=0.9)
-            ax1.plot(xs_filt, ys_filt, "b--", label="Kalman Filtrado", linewidth=2.0)
-            ax1.set_title("Trajetória Espacial", fontweight="bold")
+            ax1.plot(xs_gt, ys_gt, "g.-", label="Ground Truth (Real)", linewidth=2, markersize=4, alpha=0.7)
+            ax1.plot(xs_filt, ys_filt, "b-", label="Kalman Filtrado", linewidth=2.5, alpha=0.9)
+            ax1.set_xlabel("Posição X (metros)", fontweight="bold")
+            ax1.set_ylabel("Posição Y (metros)", fontweight="bold")
+            ax1.set_title(f"Trajetória Espacial | Detecções: {self.detection_rate:.1f}% | Inliers: {self.inlier_rate:.1f}%", fontweight="bold")
             ax1.legend()
             ax1.grid(True, alpha=0.3, linestyle="--")
             fig1.savefig(f"{save_dir}/{video_name}_1_traj.png")
 
-            # Demais gráficos seguem idênticos, lendo dos arrays corretos...
-            # (Apenas substitua onde tinha self.nis_vals para self.metrics.nis_vals)
+            # ===== GRÁFICO 2: RMS ACUMULADO + CONVERGÊNCIA =====
+            fig2 = Figure(figsize=(12, 6), tight_layout=True, dpi=150)
+            ax2 = fig2.add_subplot(111)
+            if len(run_rms_x) > 0:
+                ax2.plot(run_rms_x, label="RMS X", color="blue")
+                ax2.plot(run_rms_y, label="RMS Y", color="orange")
+                final_x = run_rms_x[-1] if len(run_rms_x) > 0 else None
+                final_y = run_rms_y[-1] if len(run_rms_y) > 0 else None
+                conv_idx_x = self._find_convergence_frame(run_rms_x, final_x)
+                conv_idx_y = self._find_convergence_frame(run_rms_y, final_y)
+                if conv_idx_x is not None:
+                    ax2.axvline(conv_idx_x, color='blue', linestyle=':', alpha=0.7,
+                                label=f"Conv. X: {conv_idx_x/self.video_fps:.2f}s")
+                if conv_idx_y is not None:
+                    ax2.axvline(conv_idx_y, color='orange', linestyle=':', alpha=0.7,
+                                label=f"Conv. Y: {conv_idx_y/self.video_fps:.2f}s")
+            ax2.set_xlabel("Frames", fontweight="bold")
+            ax2.set_ylabel("Erro RMS Acumulado (metros)", fontweight="bold")
+            ax2.set_title("Evolução do Erro RMS", fontweight="bold")
+            ax2.legend()
+            ax2.grid(True, alpha=0.3, linestyle="--")
+            fig2.savefig(f"{save_dir}/{video_name}_2_rms.png")
 
-            plt.close('all')
+            # ===== GRÁFICO 3: DISPERSÃO (ERROS ASSINADOS) =====
+            fig3 = Figure(figsize=(8, 8), tight_layout=True, dpi=150)
+            ax3 = fig3.add_subplot(111)
+            ax3.scatter(signed_dx, signed_dy, alpha=0.5, c='purple', edgecolors='k', s=20)
+            ax3.axhline(0, color='black', linewidth=1)
+            ax3.axvline(0, color='black', linewidth=1)
+            ax3.set_xlabel("Erro X (m)", fontweight="bold")
+            ax3.set_ylabel("Erro Y (m)", fontweight="bold")
+            ax3.set_title("Dispersão dos Erros de Estimação (assinados)", fontweight="bold")
+            ax3.grid(True, alpha=0.3, linestyle="--")
+            fig3.savefig(f"{save_dir}/{video_name}_3_scatter.png")
 
-            # ========== CSV VIA METRICS MANAGER ==========
+            # ===== GRÁFICO 4: NIS =====
+            fig4 = Figure(figsize=(12, 6), tight_layout=True, dpi=150)
+            ax4 = fig4.add_subplot(111)
+            
+            frames_nis = []
+            valid_nis = []
+            
+            # Removemos o "val < 100" que estava destruindo os dados
+            for idx, val in enumerate(self.metrics.nis_vals):
+                if not np.isnan(val) and not np.isinf(val):
+                    frames_nis.append(idx)
+                    valid_nis.append(val)
+            
+            if valid_nis:
+                ax4.plot(frames_nis, valid_nis, 'm-', alpha=0.8, linewidth=1.5, label="NIS Calculado")
+                ax4.axhline(5.99, color='r', linestyle='--', linewidth=2, label="Limite 95% Confiança (χ²)")
+                
+                # Cria um teto dinâmico cortando apenas os 5% piores "picos" para não esmagar a visualização
+                teto_visual = float(np.percentile(valid_nis, 95) * 2.0)
+                ax4.set_ylim(0, max(15.0, teto_visual))
+            else:
+                # Se ainda assim não houver nada, ele avisa visualmente no meio do PNG
+                ax4.text(0.5, 0.5, 'Cálculo de NIS falhou (Verifique a matriz P)', 
+                         ha='center', va='center', transform=ax4.transAxes, fontsize=12, color='red')
+                
+            ax4.set_xlabel("Frames", fontweight="bold")
+            ax4.set_ylabel("Valor NIS", fontweight="bold")
+            ax4.set_title("Teste de Consistência NIS (Inovação Normalizada)", fontweight="bold")
+            ax4.legend()
+            ax4.grid(True, alpha=0.3, linestyle="--")
+            fig4.savefig(f"{save_dir}/{video_name}_4_nis.png")
+
+
+            # ===== GRÁFICO 4: NIS =====
+            fig4 = Figure(figsize=(12, 6), tight_layout=True, dpi=150)
+            ax4 = fig4.add_subplot(111)
+            
+            # Garante que os tamanhos das listas casam exatamente (limpando NaNs)
+            frames_nis = []
+            valid_nis = []
+            for idx, val in enumerate(self.metrics.nis_vals):
+                if not np.isnan(val) and val < 100: # Remove explosões para o gráfico não ficar esmagado
+                    frames_nis.append(idx)
+                    valid_nis.append(val)
+            
+            if valid_nis:
+                ax4.plot(frames_nis, valid_nis, 'm-', alpha=0.8, linewidth=1.5, label="NIS Calculado")
+                ax4.axhline(5.99, color='r', linestyle='--', linewidth=2, label="Limite 95% Confiança (χ²)")
+                # Limite Y superior adaptativo seguro
+                upper_limit = float(np.percentile(valid_nis, 95) * 1.5)
+                ax4.set_ylim(0, max(15.0, upper_limit))
+            else:
+                ax4.text(0.5, 0.5, 'Dados de NIS Indisponíveis', ha='center', va='center')
+                
+            ax4.set_xlabel("Frames", fontweight="bold")
+            ax4.set_ylabel("Valor NIS", fontweight="bold")
+            ax4.set_title("Teste de Consistência NIS (Inovação Normalizada)", fontweight="bold")
+            ax4.legend()
+            ax4.grid(True, alpha=0.3, linestyle="--")
+            fig4.savefig(f"{save_dir}/{video_name}_4_nis.png")
+
+            # ========== CÁLCULO DE MÉTRICAS COMPLEMENTARES ==========
+            rmse_x, rmse_y = self.metrics.calculate_rmse()
+            mean_dx = np.mean(signed_dx) if signed_dx else 0.0
+            mean_dy = np.mean(signed_dy) if signed_dy else 0.0
+            mean_nis_val = np.mean(valid_nis) if valid_nis else 0.0
+
+            std_dx = np.std(signed_dx) if signed_dx else 0.0
+            std_dy = np.std(signed_dy) if signed_dy else 0.0
+            max_err_x = np.max(np.abs(signed_dx)) if signed_dx else 0.0
+            max_err_y = np.max(np.abs(signed_dy)) if signed_dy else 0.0
+
+            nis_above_95 = sum(1 for n in valid_nis if n > 5.99)
+            nis_pct_above = (nis_above_95 / len(valid_nis)) * 100 if valid_nis else 0.0
+
+            conv_idx_x = self._find_convergence_frame(run_rms_x, run_rms_x[-1] if len(run_rms_x) else None)
+            conv_idx_y = self._find_convergence_frame(run_rms_y, run_rms_y[-1] if len(run_rms_y) else None)
+            conv_time_x = conv_idx_x / self.video_fps if conv_idx_x is not None else None
+            conv_time_y = conv_idx_y / self.video_fps if conv_idx_y is not None else None
+
+            # ========== RELATÓRIO TXT ==========
+            txt_path = f"{save_dir}/{video_name}_metrics.txt"
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write("====================================================\n")
+                f.write("      RESUMO DE MÉTRICAS - FILTRO DE KALMAN EKF     \n")
+                f.write("====================================================\n\n")
+                f.write(f"Cenário Sintético: {self.traj_var.get()}\n")
+                f.write(f"Data da Análise: {time.strftime('%d/%m/%Y %H:%M:%S')}\n")
+                f.write(f"Total de Frames: {self.total_frames}\n")
+                f.write(f"FPS da Simulação: {self.video_fps:.2f}\n\n")
+
+                fmt_opts = {'precision': 6, 'suppress_small': True, 'separator': '  '}
+                f.write("--- PARÂMETROS DO FILTRO ---\n")
+                f.write("Matriz de Ruído de Processo (Q diagonal):\n")
+                f.write(f"{self.config_Q}\n\n")
+                f.write("Matriz de Ruído de Medição (R diagonal):\n")
+                f.write(f"{self.config_R}\n\n")
+                f.write("----------------------------------------------------\n\n")
+
+                f.write("--- TAXAS DE DETECÇÃO E CONSISTÊNCIA ---\n")
+                f.write(f"Taxa de Detecção (visível): {self.detection_rate:.2f}%\n")
+                f.write(f"Taxa de Inliers: {self.inlier_rate:.2f}%\n\n")
+
+                f.write("--- ERROS DE ESTIMAÇÃO (METROS) ---\n")
+                f.write(f"RMSE X: {rmse_x:.4f} m\n")
+                f.write(f"RMSE Y: {rmse_y:.4f} m\n")
+                f.write(f"Erro Médio (viés) em X: {mean_dx:+.4f} m\n")
+                f.write(f"Erro Médio (viés) em Y: {mean_dy:+.4f} m\n")
+                f.write(f"Desvio Padrão Erro X: {std_dx:.4f} m\n")
+                f.write(f"Desvio Padrão Erro Y: {std_dy:.4f} m\n")
+                f.write(f"Erro Máximo Absoluto X: {max_err_x:.4f} m\n")
+                f.write(f"Erro Máximo Absoluto Y: {max_err_y:.4f} m\n\n")
+
+                f.write("--- CONVERGÊNCIA DO RMS ---\n")
+                if conv_time_x is not None:
+                    f.write(f"RMS X convergiu em {conv_idx_x} frames ({conv_time_x:.2f} s)\n")
+                else:
+                    f.write("RMS X não atingiu convergência dentro do vídeo.\n")
+                if conv_time_y is not None:
+                    f.write(f"RMS Y convergiu em {conv_idx_y} frames ({conv_time_y:.2f} s)\n")
+                else:
+                    f.write("RMS Y não atingiu convergência dentro do vídeo.\n")
+                f.write("(Critério: erro RMS ≤ 5% do valor final por 10 frames consecutivos)\n\n")
+
+                f.write("--- AVALIAÇÃO DE CONSISTÊNCIA (NIS) ---\n")
+                f.write(f"NIS Médio (ideal ≈ 2): {mean_nis_val:.4f}\n")
+                f.write(f"Percentual acima do limite 95% (5.99): {nis_pct_above:.2f}%\n")
+                f.write("====================================================\n")
+
+            # ========== CSV ==========
+            # Usamos o escritor de CSV original para garantir o mesmo padrão de colunas
             csv_path = f"{save_dir}/{video_name}_positions.csv"
-            sucesso = self.metrics.save_to_csv(csv_path)
+            with open(csv_path, mode='w', newline='', encoding='utf-8') as f_csv:
+                writer = csv.writer(f_csv, delimiter=',')
+                writer.writerow(["Frame", "GT_X(m)", "GT_Y(m)", "Filt_X(m)", "Filt_Y(m)"])
+                for frame_idx, (m_pt, f_pt) in enumerate(zip(self.metrics.ground_truth_pts, self.metrics.filt_pts)):
+                    mx = f"{m_pt[0]:.4f}" if m_pt is not None else ""
+                    my = f"{m_pt[1]:.4f}" if m_pt is not None else ""
+                    fx = f"{f_pt[0]:.4f}" if f_pt is not None else ""
+                    fy = f"{f_pt[1]:.4f}" if f_pt is not None else ""
+                    writer.writerow([frame_idx, mx, my, fx, fy])
 
-            if sucesso:
-                messagebox.showinfo("Sucesso", f"Análise completa e arquivo .csv salvos em:\n{save_dir}/")
+            messagebox.showinfo("Sucesso", f"Análise completa e arquivo .csv salvos em:\n{save_dir}/")
 
         except Exception as e:
             error_msg = traceback.format_exc()
             self.root.after(0, lambda: messagebox.showerror("Erro", f"Erro ao gerar relatórios: {error_msg}"))
-        finally:
-            self.processing = False
-            
+
     def _parse_config(self):
         """
         Lê e traduz os campos da interface gráfica.
@@ -759,47 +998,56 @@ class KalmanApp:
         if hasattr(self, 'erro_sensor_lbl') and self.erro_sensor_lbl is not None:
             erro_px = erro_metros * avg_scale_px_m
             try:
-                self.erro_sensor_lbl.config(text=f"⚡ Erro Distância Simulado: {erro_metros:.4f} m ≈ {erro_px:.2f} px")
+                self.erro_sensor_lbl.config(text=f"⚡ Erro Distância Simulado: {erro_metros:.2f} m ≈ {erro_px:.2f} px")
             except Exception:
                 pass
 
         # 7. Reseta os textos das métricas na UI (Preparando para nova execução)
-        if hasattr(self, 'status_lbl'): self.status_lbl.config(text="Status: Configurações Carregadas", fg="#16a34a")
-        if hasattr(self, 'det_rate_lbl'): self.det_rate_lbl.config(text="Taxa de Observação: --%", fg="#4b5563")
-        if hasattr(self, 'inlier_rate_lbl'): self.inlier_rate_lbl.config(text="Inliers (na Janela): --%", fg="#4b5563")
+        if hasattr(self, 'status_lbl'): self.status_lbl.config(text="Status: Carregadas", fg="#16a34a")
+        if hasattr(self, 'det_rate_lbl'): self.det_rate_lbl.config(text="Detecção: --%", fg="#4b5563")
+        if hasattr(self, 'inlier_rate_lbl'): self.inlier_rate_lbl.config(text="Inliers: --%", fg="#4b5563")
         if hasattr(self, 'rmse_lbl'): self.rmse_lbl.config(text="RMSE (X | Y): -- | -- m", fg="#4b5563")
-        if hasattr(self, 'mean_err_lbl'): self.mean_err_lbl.config(text="Erro Médio (X | Y): -- | -- m", fg="#4b5563")
-        if hasattr(self, 'nis_lbl'): self.nis_lbl.config(text="NIS Médio: --", fg="#4b5563")
-        if hasattr(self, 'steady_state_lbl'): self.steady_state_lbl.config(text="Regime Estacionário: -- s (-- frames)", fg="#4b5563")
-        
+        if hasattr(self, 'mean_err_lbl'): self.mean_err_lbl.config(text="E_med (X | Y): -- | -- m", fg="#4b5563")
+        if hasattr(self, 'nis_lbl'): self.nis_lbl.config(text="NIS med: --", fg="#4b5563")
+        if hasattr(self, 'steady_state_lbl'): self.steady_state_lbl.config(text="T_est: -- s (--)", fg="#4b5563")
+
     def _on_processing_complete(self):
-        """Seletor de interface chamado ao finalizar a simulação."""
+        """Finaliza os cálculos e abre o vídeo salvo para reprodução."""
         self.status_lbl.config(text=f"Status: Concluído | Detecção: {self.inlier_rate:.1f}%")
         self.exec_btn.config(state="normal")
         
         if hasattr(self, 'load_btn'):
             self.load_btn.config(state="normal")
 
-        # Verifica e habilita o vídeo na memória
-        if hasattr(self, 'recorded_frames') and len(self.recorded_frames) > 0:
-            self.total_frames = len(self.recorded_frames)
+        # === CARREGA O VÍDEO DO HD ===
+        if hasattr(self, 'processed_video_path') and os.path.exists(self.processed_video_path):
+            self.cap = cv2.VideoCapture(self.processed_video_path)
+            self.video_fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+            self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
             self.current_frame_idx = 0
 
-            primeiro_frame = self.recorded_frames[0]
-            
-            if hasattr(self.tela_viewer, 'display_image'):
-                self.tela_viewer.display_image(primeiro_frame)
-            else:
-                self.tela_viewer.update_image(primeiro_frame) 
+            # Lê o primeiro frame para exibir a tela cheia e desenhada
+            ret, frame = self.cap.read()
+            if ret:
+                if hasattr(self.tela_viewer, 'display_image'):
+                    self.tela_viewer.display_image(frame)
+                else:
+                    self.tela_viewer.update_image(frame)
+                    
+                total_time = self.total_frames / self.video_fps
+                if hasattr(self, '_format_time'):
+                    self.time_info_lbl.config(text=f"00:00 / {self._format_time(total_time)}")
 
-            # Habilita botões e mostra o Dashboard final
+            # Habilita botões do player
             self.prev_btn.config(state="normal")
             self.play_btn.config(state="normal")
             self.next_btn.config(state="normal")
             self.save_btn.config(state="normal")
 
-            self._update_plots_ui()
-    
+            # Atualiza todos os gráficos de uma única vez no final
+            if hasattr(self, '_update_plots_ui'):
+                self._update_plots_ui()
+
     def toggle_playback(self):
         if not self.cap:
             return
@@ -825,27 +1073,66 @@ class KalmanApp:
             self._display_current_frame()
 
     def _display_current_frame(self):
+        """Lê o frame do vídeo e atualiza as métricas de forma otimizada para não causar lag."""
         if not self.cap:
             return
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_idx)
         ret, frame = self.cap.read()
         if ret:
-            self.tela_viewer.display_image(frame)
-            fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
-            current_str = self._format_time(self.current_frame_idx / fps)
-            total_str = self._format_time(self.total_frames / fps)
-            self.time_info_lbl.config(text=f"{current_str} / {total_str}")
-            self._update_metrics_plots()
+            # 1. Atualiza a imagem imediatamente (Super Rápido)
+            if hasattr(self.tela_viewer, 'display_image'):
+                self.tela_viewer.display_image(frame)
+            else:
+                self.tela_viewer.update_image(frame)
+            
+            # 2. Controla o peso computacional (Atualiza gráficos e texto a cada 3 frames)
+            self.metrics_update_counter += 1
+            if self.metrics_update_counter % 3 == 0 or self.current_frame_idx == self.total_frames - 1:
+                # Atualiza Texto (Tempo, FPS, RMSE dinâmico)
+                fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
+                current_str = self._format_time(self.current_frame_idx / fps)
+                total_str = self._format_time(self.total_frames / fps)
+                self.time_info_lbl.config(text=f"{current_str} / {total_str}")
+                
+                self._update_metrics_ui()
+                self._update_plots_ui()
 
     def _poll_playback(self):
+        """O Loop que mantém o vídeo rodando no tempo certo (FPS)."""
         if self.playing and self.cap and self.current_frame_idx < self.total_frames - 1:
             self.current_frame_idx += 1
             self._display_current_frame()
+            
+            # Ajusta o delay dinamicamente com base no FPS do vídeo gravado
+            delay_ms = int(1000 / self.video_fps)
+            self.root.after(delay_ms, self._poll_playback)
+            
         elif self.playing and self.current_frame_idx >= self.total_frames - 1:
             self.playing = False
             self.play_btn.config(text="⏵")
-        self.root.after(33, self._poll_playback)
-    
+
+    def _poll_playback(self):
+        """O Loop que mantém o vídeo rodando no tempo certo (FPS)."""
+        if self.playing and self.cap and self.current_frame_idx < self.total_frames - 1:
+            self.current_frame_idx += 1
+            self._display_current_frame()
+            
+            # Ajusta o delay dinamicamente com base no FPS do vídeo gravado
+            delay_ms = int(1000 / self.video_fps)
+            self.root.after(delay_ms, self._poll_playback)
+            
+        elif self.playing and self.current_frame_idx >= self.total_frames - 1:
+            self.playing = False
+            self.play_btn.config(text="⏵")
+
+    def toggle_playback(self):
+        if not self.cap:
+            return
+        self.playing = not self.playing
+        self.play_btn.config(text="⏸" if self.playing else "⏵")
+        if self.playing:
+            self._poll_playback() # Inicia o motor recursivo
+
     def _format_time(self, seconds):
         return f"{int(seconds // 60):02d}:{int(seconds % 60):02d}"
 

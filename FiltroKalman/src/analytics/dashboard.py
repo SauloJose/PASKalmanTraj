@@ -90,3 +90,49 @@ class ChartsDashboard:
         self.rmsy_canvas.draw_idle()
         self.hist_canvas.draw_idle()
         self.scatter_canvas.draw_idle()
+
+    def update_dashboard(self, metrics: MetricsManager, upto_idx: int):
+        """
+        Lê os dados do MetricsManager e atualiza os 4 subplots até o frame atual.
+        """
+        if upto_idx <= 0 or not metrics.sqerr_x:
+            return
+
+        # 1. Atualização do RMS X
+        self.rmsx_ax.clear()
+        self._style_ax(self.rmsx_ax) # Reaplica o estilo após limpar
+        cum_rmse_x = np.sqrt(np.cumsum(metrics.sqerr_x[:upto_idx]) / (np.arange(upto_idx) + 1))
+        self.rmsx_ax.plot(cum_rmse_x, color='#2563eb', linewidth=1.5)
+
+        # 2. Atualização do RMS Y
+        self.rmsy_ax.clear()
+        self._style_ax(self.rmsy_ax)
+        cum_rmse_y = np.sqrt(np.cumsum(metrics.sqerr_y[:upto_idx]) / (np.arange(upto_idx) + 1))
+        self.rmsy_ax.plot(cum_rmse_y, color='#ea580c', linewidth=1.5)
+
+        # Extrai os erros assinados (resíduos) para o histograma e dispersão
+        signed_dx, signed_dy = metrics.get_signed_errors(upto_idx)
+
+        # 3. Atualização do Histograma
+        self.hist_ax.clear()
+        self._style_ax(self.hist_ax)
+        if signed_dx and signed_dy:
+            self.hist_ax.hist(signed_dx, bins=15, alpha=0.6, color='#3b82f6', label='Erro X')
+            self.hist_ax.hist(signed_dy, bins=15, alpha=0.6, color='#f97316', label='Erro Y')
+            self.hist_ax.legend(loc='upper right', fontsize=7, facecolor="#f5f5f5", edgecolor="#999999")
+
+        # 4. Atualização do Scatter Plot (Dispersão)
+        self.scatter_ax.clear()
+        self._style_ax(self.scatter_ax)
+        if signed_dx and signed_dy:
+            self.scatter_ax.scatter(signed_dx, signed_dy, alpha=0.5, c='purple', edgecolors='k', s=15)
+            self.scatter_ax.axhline(0, color='black', linewidth=1, alpha=0.5)
+            self.scatter_ax.axvline(0, color='black', linewidth=1, alpha=0.5)
+            
+            # Ajusta limites dinamicamente
+            max_err = max(max(np.abs(signed_dx)), max(np.abs(signed_dy)), 0.1)
+            self.scatter_ax.set_xlim(-max_err * 1.2, max_err * 1.2)
+            self.scatter_ax.set_ylim(-max_err * 1.2, max_err * 1.2)
+
+        # 5. Redesenha tudo
+        self.draw_all()

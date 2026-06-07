@@ -14,7 +14,7 @@ class MetricsManager:
         self.nis_vals = []          # Valores de NIS (Normalized Innovation Squared)
         self.measurements_raw = []  # Leituras brutas das distâncias das torres
 
-    def push_frame(self, gt_x, gt_y, est_x, est_y, nis_val=0.0, raw_z=None):
+    def push_frame(self, gt_x, gt_y, est_x, est_y, nis_val=np.nan, raw_z=None):
         """Adiciona os dados calculados de um frame específico."""
         self.ground_truth_pts.append((gt_x, gt_y))
         self.filt_pts.append((est_x, est_y))
