@@ -182,38 +182,83 @@ class TrajectoryGenerator:
     def generate_random(self, start_pos: Tuple[float, float], initial_velocity: float, 
                         noise_std: float, duration: float) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Gera uma trajetória com caminhada aleatória suave (Random Walk nas Acelerações).
+        Gera uma trajetória onde o alvo navega em retas de no mínimo 15 metros, 
+        fazendo curvas suaves para mudar de direção.
         """
         num_steps = int(duration / self.dt)
         t, states = self._init_vectors(num_steps)
         
-        # Início
+        # Posição inicial
         states[0, 0], states[0, 1] = start_pos
         
-        # Direção inicial aleatória
-        angle = np.random.uniform(0, 2 * np.pi)
-        states[0, 2] = initial_velocity * np.cos(angle)
-        states[0, 3] = initial_velocity * np.sin(angle)
+        # Dinâmica de navegação
+        current_angle = np.random.uniform(0, 2 * np.pi)
+        target_angle = current_angle
+        current_vel = initial_velocity
+        target_vel = initial_velocity
         
-        # Iteração de Integração Euler Simples para gerar a trajetória
+        distance_since_turn = 0.0
+        
+        # Preenche os estados iniciais da velocidade
+        states[0, 2] = current_vel * np.cos(current_angle)
+        states[0, 3] = current_vel * np.sin(current_angle)
+        
         for i in range(1, num_steps):
-            # Aceleração recebe um ruído Gaussiano
-            ax = np.random.normal(0, noise_std)
-            ay = np.random.normal(0, noise_std)
+            # Verifica se já andou o suficiente na direção atual (> 15 metros)
+            if distance_since_turn > 15.0:
+                # Distância do centro (para evitar que saia da arena)
+                dist_from_center = np.hypot(states[i-1, 0] - start_pos[0], states[i-1, 1] - start_pos[1])
+                
+                if dist_from_center > 35.0:
+                    # Força uma curva suave apontando de volta para o centro
+                    target_angle = np.arctan2(start_pos[1] - states[i-1, 1], start_pos[0] - states[i-1, 0])
+                else:
+                    # Sorteia uma nova direção (curva entre -60 e 60 graus da direção atual)
+                    target_angle = current_angle + np.random.uniform(-np.pi/3, np.pi/3)
+                
+                # Sorteia uma leve variação de velocidade
+                target_vel = initial_velocity + np.random.uniform(-noise_std, noise_std)
+                target_vel = max(1.0, target_vel) # Garante que não ande para trás nem pare
+                
+                # Zera o contador de distância
+                distance_since_turn = 0.0
             
-            # Fator de amortecimento leve para a velocidade não explodir infinitamente
-            damping = 0.98 
+            # 1. INTERPOLAÇÃO DO ÂNGULO (Fazendo a Curva)
+            angle_diff = (target_angle - current_angle)
+            # Normaliza a diferença de ângulo para o caminho mais curto (-pi a pi)
+            angle_diff = (angle_diff + np.pi) % (2 * np.pi) - np.pi
             
-            states[i, 4] = ax
-            states[i, 5] = ay
+            # Limita a taxa de giro máxima (ex: max 0.8 radianos por segundo)
+            turn_rate = 1.5 * angle_diff 
+            max_turn = 0.8
+            turn_rate = np.clip(turn_rate, -max_turn, max_turn)
+            current_angle += turn_rate * self.dt
             
-            # Atualiza velocidade: v = v0*damp + a*dt
-            states[i, 2] = states[i-1, 2] * damping + ax * self.dt
-            states[i, 3] = states[i-1, 3] * damping + ay * self.dt
+            # 2. INTERPOLAÇÃO DA VELOCIDADE (Aceleração/Desaceleração linear)
+            accel_linear = (target_vel - current_vel) * 1.0
+            max_accel = 1.0 # m/s^2
+            accel_linear = np.clip(accel_linear, -max_accel, max_accel)
+            current_vel += accel_linear * self.dt
             
-            # Atualiza posição: p = p0 + v*dt + 0.5*a*dt^2
-            states[i, 0] = states[i-1, 0] + states[i-1, 2] * self.dt + 0.5 * ax * (self.dt**2)
-            states[i, 1] = states[i-1, 1] + states[i-1, 3] * self.dt + 0.5 * ay * (self.dt**2)
+            # 3. ATUALIZA VETORES E POSIÇÃO
+            vx = current_vel * np.cos(current_angle)
+            vy = current_vel * np.sin(current_angle)
+            
+            # Posição: p = p0 + v*dt
+            states[i, 0] = states[i-1, 0] + vx * self.dt
+            states[i, 1] = states[i-1, 1] + vy * self.dt
+            
+            # Aceleração calculada numericamente para o EKF (PVA) usar no Ground Truth
+            states[i, 4] = (vx - states[i-1, 2]) / self.dt
+            states[i, 5] = (vy - states[i-1, 3]) / self.dt
+            
+            # Atualiza velocidades do estado
+            states[i, 2] = vx
+            states[i, 3] = vy
+            
+            # Acumula a distância percorrida no frame atual
+            step_dist = current_vel * self.dt
+            distance_since_turn += step_dist
             
         return t, states
 
