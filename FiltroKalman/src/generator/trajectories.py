@@ -263,29 +263,95 @@ class TrajectoryGenerator:
             
         return t, states
 
-    def generate_occlusion(self, radius: float, center: Tuple[float, float], 
-                           linear_velocity: float, duration: float, 
+    def generate_occlusion(self, start_pos: Tuple[float, float], initial_velocity: float, 
+                           noise_std: float, duration: float, 
                            occlusion_frames: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Gera uma trajetória circular e retorna também uma máscara de visibilidade (booleana).
+        Gera uma trajetória aleatória onde o alvo muda de direção no MÁXIMO a cada 20 metros.
+        Retorna também uma máscara de visibilidade (booleana) com 4 oclusões distribuídas na trajetória.
         True = Medição disponível, False = Objeto Oculto (Sumiço).
         """
-        # Utiliza a cinemática do círculo como Ground Truth
-        t, states = self.generate_circle(radius, center, linear_velocity, duration)
+        num_steps = int(duration / self.dt)
+        t, states = self._init_vectors(num_steps)
         
-        # Cria a máscara (todos iniciam visíveis)
-        visible_mask = np.ones(len(t), dtype=bool)
+        states[0, 0], states[0, 1] = start_pos
         
-        # Define a oclusão no meio da trajetória
-        mid_idx = len(t) // 2
+        current_angle = np.random.uniform(0, 2 * np.pi)
+        target_angle = current_angle
+        current_vel = initial_velocity
+        target_vel = initial_velocity
+        
+        states[0, 2] = current_vel * np.cos(current_angle)
+        states[0, 3] = current_vel * np.sin(current_angle)
+        
+        distance_since_turn = 0.0
+        
+        # Define o limite de distância inicial (sorteia entre 5 e 20 metros)
+        target_distance = np.random.uniform(5.0, 20.0)
+        
+        for i in range(1, num_steps):
+            # Modifica a direção se atingiu o alvo sorteado (que é no máximo 20)
+            if distance_since_turn >= target_distance:
+                dist_from_center = np.hypot(states[i-1, 0] - start_pos[0], states[i-1, 1] - start_pos[1])
+                
+                if dist_from_center > 35.0:
+                    target_angle = np.arctan2(start_pos[1] - states[i-1, 1], start_pos[0] - states[i-1, 0])
+                else:
+                    target_angle = current_angle + np.random.uniform(-np.pi/2, np.pi/2)
+                
+                target_vel = initial_velocity + np.random.uniform(-noise_std, noise_std)
+                target_vel = max(1.0, target_vel)
+                
+                # Zera o contador e sorteia um novo limite de até 20 metros
+                distance_since_turn = 0.0
+                target_distance = np.random.uniform(5.0, 20.0)
+            
+            # Interpolação do Ângulo
+            angle_diff = (target_angle - current_angle)
+            angle_diff = (angle_diff + np.pi) % (2 * np.pi) - np.pi
+            turn_rate = np.clip(1.5 * angle_diff, -0.8, 0.8)
+            current_angle += turn_rate * self.dt
+            
+            # Interpolação da Velocidade
+            accel_linear = np.clip((target_vel - current_vel) * 1.0, -1.0, 1.0)
+            current_vel += accel_linear * self.dt
+            
+            # Atualiza Vetores e Posição
+            vx = current_vel * np.cos(current_angle)
+            vy = current_vel * np.sin(current_angle)
+            
+            states[i, 0] = states[i-1, 0] + vx * self.dt
+            states[i, 1] = states[i-1, 1] + vy * self.dt
+            
+            # Aceleração para o Ground Truth (PVA)
+            states[i, 4] = (vx - states[i-1, 2]) / self.dt
+            states[i, 5] = (vy - states[i-1, 3]) / self.dt
+            
+            states[i, 2] = vx
+            states[i, 3] = vy
+            
+            # Acumula a distância percorrida
+            distance_since_turn += current_vel * self.dt
+
+        # =====================================================================
+        # 2. APLICAÇÃO DAS 4 OCLUSÕES DISTRIBUÍDAS
+        # =====================================================================
+        visible_mask = np.ones(num_steps, dtype=bool)
+        
+        # Divide a trajetória em 4 blocos iguais de tempo
+        segment_length = num_steps // 4
         half_occ = occlusion_frames // 2
         
-        start_occ = max(0, mid_idx - half_occ)
-        end_occ = min(len(t), mid_idx + half_occ)
-        
-        # Marca o trecho como oculto (False)
-        visible_mask[start_occ:end_occ] = False
-        
+        for j in range(4):
+            # Posiciona o apagão exatamente no meio de cada um dos 4 blocos
+            mid_idx = j * segment_length + (segment_length // 2)
+            
+            start_occ = max(0, mid_idx - half_occ)
+            end_occ = min(num_steps, mid_idx + half_occ)
+            
+            # Marca o trecho como oculto (False)
+            visible_mask[start_occ:end_occ] = False
+            
         return t, states, visible_mask
     
     def plot_scenario(self, t: np.ndarray, states_gt: np.ndarray, title: str):

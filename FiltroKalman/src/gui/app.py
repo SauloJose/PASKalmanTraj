@@ -160,7 +160,7 @@ class KalmanApp:
         config_lbl_frame.pack(fill="x", padx=8, pady=1)
 
         self.detector_noise_entry = ttk.Entry(config_lbl_frame, width=10)
-        self.detector_noise_entry.insert(0, "1")
+        self.detector_noise_entry.insert(0, "0.3")
         
         lbl_noise = ttk.Label(config_lbl_frame, text="Ruído do Sensor (Metros):", font=("Segoe UI", 8))
         lbl_noise.pack(anchor="w", pady=(1, 0))
@@ -489,8 +489,8 @@ class KalmanApp:
             add_param(1, "Ruído Máx (m):", 0.5, "ruido")
             
         elif traj_type == "Oclusão":
-            add_param(0, "Raio Base (m):", 30.0, "raio")
-            add_param(1, "Sumiço (frames):", 30, "oclusao_frames")
+            add_param(0, "Velocidade (m/s):", 5.0, "velocidade")
+            add_param(1, "Sumiço/Vez (fr):", 30, "oclusao_frames")
     
     def _on_escape(self, event=None):
         try:
@@ -562,9 +562,17 @@ class KalmanApp:
                 t, states = gen.generate_random((self.max_x / 2, self.max_y / 2), vel, ruido, duracao)
                 mask = np.ones(len(t), dtype=bool)
             elif tipo_traj == "Oclusão":
-                raio = float(self.traj_params["raio"].get())
                 frames_occ = int(self.traj_params["oclusao_frames"].get())
-                t, states, mask = gen.generate_occlusion(raio, (self.max_x / 2, self.max_y / 2), 5.0, duracao, frames_occ)
+                pos_inicial = (self.max_x / 2, self.max_y / 2)
+                vel_inicial = 5.0
+                ruido_vel = 1.0 
+                t, states, mask = gen.generate_occlusion(
+                    start_pos=pos_inicial,
+                    initial_velocity=vel_inicial,
+                    noise_std=ruido_vel,
+                    duration=duracao,
+                    occlusion_frames=frames_occ
+                )
             else:
                 t, states = gen.generate_circle(25, (self.max_x / 2, self.max_y / 2), 3.0, duracao)
                 mask = np.ones(len(t), dtype=bool)
@@ -1276,6 +1284,7 @@ class KalmanApp:
             # =========================================================
             if hasattr(self, 'dashboard') and self.dashboard is not None:
                 self.dashboard.plot_final_results(self.metrics)
+    
     def next_frame(self):
         if not self.cap:
             return
