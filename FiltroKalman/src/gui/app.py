@@ -160,7 +160,7 @@ class KalmanApp:
         config_lbl_frame.pack(fill="x", padx=8, pady=1)
 
         self.detector_noise_entry = ttk.Entry(config_lbl_frame, width=10)
-        self.detector_noise_entry.insert(0, "0.16")
+        self.detector_noise_entry.insert(0, "1")
         
         lbl_noise = ttk.Label(config_lbl_frame, text="Ruído do Sensor (Metros):", font=("Segoe UI", 8))
         lbl_noise.pack(anchor="w", pady=(1, 0))
@@ -172,7 +172,7 @@ class KalmanApp:
         q_frame.pack(fill="x", pady=(0, 1))
         
         q_labels = ["Q[0,0]", "Q[1,1]", "Q[2,2]", "Q[3,3]", "Q[4,4]", "Q[5,5]"]
-        default_q_vals = ["3", "3", "3", "3", "3", "3"]
+        default_q_vals = ["4", "4", "4", "4", "4", "4"]
         
         self.q_entries = []
         for i, label in enumerate(q_labels):
@@ -196,7 +196,7 @@ class KalmanApp:
         r_frame.pack(fill="x", pady=(0, 1))
         
         r_labels = ["R[0,0]", "R[1,1]", "R[2,2]", "R[3,3]"] # Alterado para 4, pois agora são 4 bases de distância
-        default_r_vals = ["1e-1", "1e-1", "1e-1", "1e-1"]
+        default_r_vals = ["1.4", "1.4", "1.4", "1.4"]
         
         self.r_entries = []
         for i, label in enumerate(r_labels):
