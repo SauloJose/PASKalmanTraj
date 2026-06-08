@@ -470,19 +470,19 @@ class KalmanApp:
 
         if traj_type == "Círculo":
             add_param(0, "Raio (m):", 30.0, "raio")
-            add_param(1, "Velocidade (m/s):", 2.0, "velocidade")
+            add_param(1, "Velocidade (m/s):", 10, "velocidade")
             
         elif traj_type == "Quadrado":
             add_param(0, "Lado (m):", 40.0, "lado")
-            add_param(1, "Velocidade (m/s):", 2.0, "velocidade")
+            add_param(1, "Velocidade (m/s):", 10, "velocidade")
             
         elif traj_type == "Tangente Hiperbólica":
             add_param(0, "Amplitude (m):", 20.0, "amplitude")
-            add_param(1, "Velocidade (m/s):", 2.0, "velocidade")
+            add_param(1, "Velocidade (m/s):", 10, "velocidade")
             
         elif traj_type == "Lemniscata": 
             add_param(0, "Amplitude (m):", 35.0, "amplitude")
-            add_param(1, "Velocidade (m/s):", 1.5, "velocidade")
+            add_param(1, "Velocidade (m/s):", 10, "velocidade")
             
         elif traj_type == "Aleatória":
             add_param(0, "Vel. Média (m/s):", 2.0, "velocidade")
@@ -490,7 +490,7 @@ class KalmanApp:
             
         elif traj_type == "Oclusão":
             add_param(0, "Raio Base (m):", 30.0, "raio")
-            add_param(1, "Sumiço (frames):", 15, "oclusao_frames")
+            add_param(1, "Sumiço (frames):", 30, "oclusao_frames")
     
     def _on_escape(self, event=None):
         try:
@@ -533,7 +533,7 @@ class KalmanApp:
             dt = 1.0 / self.video_fps
             gen = TrajectoryGenerator(dt, self.towers)
             tipo_traj = self.traj_var.get()
-            duracao = 20.0
+            duracao = 40
 
             if tipo_traj == "Círculo":
                 raio = float(self.traj_params["raio"].get())
