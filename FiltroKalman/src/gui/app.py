@@ -1118,6 +1118,15 @@ class KalmanApp:
         self.mean_err_lbl.config(text=f"E_m (X|Y): {mean_err_x:+.2f} | {mean_err_y:+.2f} m")
         self.nis_lbl.config(text=f"NIS_m: {self.mean_nis:.2f} (esp ~{esp_nis:.0f})")
         
+        if hasattr(self, 'P_matrizes') and self.P_matrizes:
+            p_final_x, p_final_y = self.P_matrizes[-1]
+            
+            if hasattr(self, 'p_dim_lbl'):
+                self.p_dim_lbl.config(text=f"P_final (X|Y): {p_final_x:.2f} | {p_final_y:.2f} m")
+            else:
+                # Fallback provisório caso a label ainda não exista
+                print(f"Incerteza Final (Matriz P): X = {p_final_x:.3f}m, Y = {p_final_y:.3f}m")
+        
         if steady_time is not None:
             self.steady_state_lbl.config(text=f"Reg. Est.: {steady_time:.1f} s ({steady_frame} fr)")
         else:
@@ -1240,6 +1249,8 @@ class KalmanApp:
             self.cap = cv2.VideoCapture(self.processed_video_path)
             self.video_fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            
+            # Zera o player de vídeo para quando o usuário der Play
             self.current_frame_idx = 0
 
             # Lê o primeiro frame para exibir a tela cheia e desenhada
@@ -1260,10 +1271,11 @@ class KalmanApp:
             self.next_btn.config(state="normal")
             self.save_btn.config(state="normal")
 
-            # Atualiza todos os gráficos de uma única vez no final
-            if hasattr(self, '_update_plots_ui'):
-                self._update_plots_ui()
-
+            # =========================================================
+            # ATUALIZAÇÃO FINAL: Plota todos os dados de uma única vez!
+            # =========================================================
+            if hasattr(self, 'dashboard') and self.dashboard is not None:
+                self.dashboard.plot_final_results(self.metrics)
     def next_frame(self):
         if not self.cap:
             return

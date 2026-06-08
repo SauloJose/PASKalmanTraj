@@ -206,3 +206,17 @@ class ChartsDashboard:
 
         # 5. Redesenha tudo de forma otimizada
         self.draw_all()
+
+    def plot_final_results(self, metrics: MetricsManager):
+        """
+        Plota imediatamente todo o histórico da simulação de uma só vez.
+        Útil para visualizar o resultado final sem precisar reproduzir o vídeo.
+        """
+        if not metrics or not metrics.sqerr_x:
+            return
+            
+        # O índice máximo é o tamanho total das listas de erro geradas
+        total_frames = len(metrics.sqerr_x)
+        
+        # Reaproveita a sua própria função de atualização, passando o limite máximo
+        self.update_dashboard(metrics, total_frames)
