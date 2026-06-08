@@ -390,7 +390,7 @@ class KalmanApp:
         self.erro_sensor_lbl.pack(side="left", padx=15)
 
         # LABEL PARA AS DIMENSÕES DE P (Atualize durante a simulação)
-        self.p_dim_lbl = tk.Label(l2_frame, text="📏 Dimensões P: X=0.00m, Y=0.00m", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#9333ea")
+        self.p_dim_lbl = tk.Label(l2_frame, text="📏 Crença (P): dX=0.00m, dY=0.00m", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#9333ea")
         self.p_dim_lbl.pack(side="left", padx=15)
 
         # --- Linha 3: Controles de Zoom e Atualização de Arena ---
@@ -686,6 +686,16 @@ class KalmanApp:
                         cv2.putText(frame, f"{dist_medida:.1f}m", (mid_x, mid_y), 
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 200, 255), 1, cv2.LINE_AA)
 
+
+
+                if mask[i]:
+                    cv2.circle(frame, (px_gt, py_gt), 3, (0, 255, 0), -1)
+                else:
+                    cv2.circle(frame, (px_gt, py_gt), 3, (0, 0, 100), -1)
+
+                if self.show_kalman_cache:
+                    cv2.circle(frame, self.m_to_px(est_x, est_y), 3, (255, 0, 0), -1)
+                
                 if self.show_window_cache and P_mat_atual is not None:
                     try:
                         win_x_m = max(self.min_window_m, std_x * 3)
@@ -702,14 +712,6 @@ class KalmanApp:
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (147, 51, 234), 2) 
                     except:
                         pass
-
-                if mask[i]:
-                    cv2.circle(frame, (px_gt, py_gt), 6, (0, 255, 0), -1)
-                else:
-                    cv2.circle(frame, (px_gt, py_gt), 6, (0, 0, 100), -1)
-
-                if self.show_kalman_cache:
-                    cv2.circle(frame, self.m_to_px(est_x, est_y), 6, (255, 0, 0), -1)
 
                 out.write(frame)
 
@@ -739,7 +741,7 @@ class KalmanApp:
                 out.release()
             # Esta chamada agora receberá a estrutura preenchida e interpretará o NIS sem interferências
             self.root.after(0, self._update_ui_metrics_and_complete)
-            
+
     def save_results(self):
         """Salva gráficos detalhados, relatório e dados brutos em CSV em src/results/"""
         if not hasattr(self, 'metrics') or not self.metrics.filt_pts or not self.metrics.ground_truth_pts:
@@ -1022,9 +1024,9 @@ class KalmanApp:
         curr_idx = self.current_frame_idx
         if curr_idx < len(self.P_matrizes):
             dim_x_P, dim_y_P = self.P_matrizes[curr_idx]
-            self.p_dim_lbl.config(text=f"📏 Dimensões P: X={dim_x_P:.2f}m, Y={dim_y_P:.2f}m")
+            self.p_dim_lbl.config(text=f"📏 Crença (P): dX={dim_x_P:.2f}m, dY={dim_y_P:.2f}m")
         else:
-            self.p_dim_lbl.config(text="📏 Dimensões P: N/A")
+            self.p_dim_lbl.config(text="📏 Crença (P): N/A")
         
         # --- 5. CÁLCULO E FORMATAÇÃO DO TEMPO DO VÍDEO ---
         fps = getattr(self, 'video_fps', 30.0)
