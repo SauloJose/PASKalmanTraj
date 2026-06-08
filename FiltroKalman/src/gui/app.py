@@ -263,7 +263,7 @@ class KalmanApp:
                                font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
         self.nis_lbl.grid(row=3, column=0, sticky="w", pady=1)
 
-        self.steady_state_lbl = tk.Label(info_lbl_frame, text="R. Est. : -- s (-- fr)", 
+        self.steady_state_lbl = tk.Label(info_lbl_frame, text="Reg. Est.: -- s (-- fr)", 
                                          font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
         self.steady_state_lbl.grid(row=3, column=1, sticky="w", pady=1)
 
@@ -1009,10 +1009,27 @@ class KalmanApp:
         esp_nis = float(num_towers) if num_towers >= 2 else 2.0
         
         # Convergência (exemplo simples - você pode manter o método _find_convergence_frame se existir)
-        steady_frame = None  # calcule se desejar
+        steady_frame = None
         steady_time = None
-        if hasattr(self, 'video_fps') and steady_frame is not None:
-            steady_time = steady_frame / self.video_fps
+        
+        if self.metrics.sqerr_x and self.metrics.sqerr_y:
+            total_frames = len(self.metrics.sqerr_x)
+            
+            # Recria o histórico do RMS para os eixos X e Y
+            cum_rmse_x = np.sqrt(np.cumsum(self.metrics.sqerr_x) / (np.arange(total_frames) + 1))
+            cum_rmse_y = np.sqrt(np.cumsum(self.metrics.sqerr_y) / (np.arange(total_frames) + 1))
+            
+            # Combina ambos em uma magnitude total de erro: RMS_total = sqrt(RMS_x^2 + RMS_y^2)
+            running_rms_total = np.sqrt(cum_rmse_x**2 + cum_rmse_y**2)
+            final_val_total = np.sqrt(rmse_x**2 + rmse_y**2)
+            
+            # Chama a sua função para encontrar o frame de convergência
+            # Defina a tolerância (tol) e estabilidade mínima (min_stable) que preferir
+            steady_frame = self._find_convergence_frame(running_rms_total, final_val_total, tol=0.05, min_stable=10)
+            
+            # Se encontrou um frame válido, calcula o tempo em segundos
+            if steady_frame is not None and hasattr(self, 'video_fps') and self.video_fps > 0:
+                steady_time = steady_frame / self.video_fps
         
         # Atualização dos labels na thread principal
         self.status_lbl.config(text="Status: Processado", fg="#16a34a")
@@ -1023,9 +1040,9 @@ class KalmanApp:
         self.nis_lbl.config(text=f"NIS_m: {self.mean_nis:.2f} (esp ~{esp_nis:.0f})")
         
         if steady_time is not None:
-            self.steady_state_lbl.config(text=f"R. Est. : {steady_time:.1f} s ({steady_frame} fr)")
+            self.steady_state_lbl.config(text=f"Reg. Est.: {steady_time:.1f} s ({steady_frame} fr)")
         else:
-            self.steady_state_lbl.config(text="R. Est. : -- s (-- fr)")
+            self.steady_state_lbl.config(text="Reg. Est.: -- s (-- fr)")
         
         # Habilita botão de salvar e inicia exibição do vídeo
         self._on_processing_complete()

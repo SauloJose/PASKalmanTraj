@@ -149,6 +149,7 @@ class TrajectoryGenerator:
         states[:, 5] = amplitude_y * (factor_dt**2) * (-2.0 * sech2_val * np.tanh(tanh_arg))
         
         return t, states
+    
     def generate_lemniscate(self, amplitude: float, center: Tuple[float, float], 
                             linear_velocity: float, duration: float) -> Tuple[np.ndarray, np.ndarray]:
         """
