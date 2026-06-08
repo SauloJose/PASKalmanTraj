@@ -8,15 +8,16 @@ from src.analytics.metrics import MetricsManager
 class ChartsDashboard:
     def __init__(self, parent_frame, style_ax_callback=None):
         """
-        Gera o painel de gráficos mantendo a estrutura desejada:
-        - Linha 1: RMS (X e Y juntos)
-        - Linha 2: Histograma | Dispersão (lado a lado)
-        - Linha 3: NIS
+        Gera o painel de gráficos mantendo a estrutura desejada com descrições breves.
         """
         self.right_frame = parent_frame
         
-        # Define o método de estilização dos eixos (prioriza o original do seu app.py se houver)
+        # Define o método de estilização dos eixos
         self._style_ax = style_ax_callback if style_ax_callback else self._default_style_ax
+
+        # Cores e fontes para as descrições
+        desc_font = ("Segoe UI", 8, "italic")
+        desc_color = "#555555"
 
         # ==========================================
         # 1. Gráfico Combinado: RMS X e Y
@@ -26,7 +27,12 @@ class ChartsDashboard:
                                   padx=4, pady=4, borderwidth=1, relief="solid")
         rms_frame.pack(fill="both", expand=True, pady=(0, 4))
         
-        self.rms_fig = Figure(figsize=(4.2, 1.8), tight_layout=True, facecolor="white")
+        # Adicionado: Label explicativa do RMS
+        rms_desc = tk.Label(rms_frame, text="Mede a precisão acumulada: RMSE = √(Σ e² / N). Menores valores indicam maior exatidão.",
+                            font=desc_font, fg=desc_color, bg="white", justify="left", anchor="w", wraplength=380)
+        rms_desc.pack(fill="x", side="top", pady=(0, 2))
+        
+        self.rms_fig = Figure(figsize=(4.2, 1.6), tight_layout=True, facecolor="white")
         self.rms_ax = self.rms_fig.add_subplot(111)
         self._style_ax(self.rms_ax)
         self.rms_canvas = FigureCanvasTkAgg(self.rms_fig, master=rms_frame)
@@ -46,7 +52,12 @@ class ChartsDashboard:
                                   padx=2, pady=2, borderwidth=1, relief="solid")
         hist_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 2))
         
-        self.hist_fig = Figure(figsize=(2.1, 1.8), tight_layout=True, facecolor="white")
+        # Adicionado: Label explicativa do Histograma
+        hist_desc = tk.Label(hist_frame, text="Frequência dos resíduos. Espera-se perfil Gaussiano centrado em zero.",
+                             font=desc_font, fg=desc_color, bg="white", justify="left", anchor="w", wraplength=180)
+        hist_desc.pack(fill="x", side="top", pady=(0, 2))
+        
+        self.hist_fig = Figure(figsize=(2.1, 1.6), tight_layout=True, facecolor="white")
         self.hist_ax = self.hist_fig.add_subplot(111)
         self._style_ax(self.hist_ax)
         self.hist_canvas = FigureCanvasTkAgg(self.hist_fig, master=hist_frame)
@@ -58,7 +69,12 @@ class ChartsDashboard:
                                   padx=2, pady=2, borderwidth=1, relief="solid")
         scatter_frame.grid(row=0, column=1, sticky="nsew", padx=(2, 0))
         
-        self.scatter_fig = Figure(figsize=(2.1, 1.8), tight_layout=True, facecolor="white")
+        # Adicionado: Label explicativa da Dispersão
+        scatter_desc = tk.Label(scatter_frame, text="Erros em 2D. Revela tendências espaciais ou desalinhamentos.",
+                                font=desc_font, fg=desc_color, bg="white", justify="left", anchor="w", wraplength=180)
+        scatter_desc.pack(fill="x", side="top", pady=(0, 2))
+        
+        self.scatter_fig = Figure(figsize=(2.1, 1.6), tight_layout=True, facecolor="white")
         self.scatter_ax = self.scatter_fig.add_subplot(111)
         self._style_ax(self.scatter_ax)
         self.scatter_canvas = FigureCanvasTkAgg(self.scatter_fig, master=scatter_frame)
@@ -72,12 +88,17 @@ class ChartsDashboard:
                                   padx=4, pady=4, borderwidth=1, relief="solid")
         nis_frame.pack(fill="both", expand=True, pady=(0, 0))
         
-        self.nis_fig = Figure(figsize=(4.2, 1.8), tight_layout=True, facecolor="white")
+        # Adicionado: Label explicativa do NIS
+        nis_desc = tk.Label(nis_frame, text="Consistência do Filtro: NIS = νᵀ S⁻¹ ν. Pontos acima do limite vermelho indicam subestimação de incerteza.",
+                            font=desc_font, fg=desc_color, bg="white", justify="left", anchor="w", wraplength=380)
+        nis_desc.pack(fill="x", side="top", pady=(0, 0))
+        
+        self.nis_fig = Figure(figsize=(4.2, 1.6), tight_layout=True, facecolor="white")
         self.nis_ax = self.nis_fig.add_subplot(111)
         self._style_ax(self.nis_ax)
         self.nis_canvas = FigureCanvasTkAgg(self.nis_fig, master=nis_frame)
         self.nis_canvas.get_tk_widget().pack(fill="both", expand=True)
-
+        
     def _default_style_ax(self, ax):
         """Caso o app principal não passe o método self._style_ax, aplica este padrão simples."""
         ax.grid(True, linestyle="--", alpha=0.5)

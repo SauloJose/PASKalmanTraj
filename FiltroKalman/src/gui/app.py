@@ -20,8 +20,6 @@ class KalmanApp:
         self.root = root
         self.root.title("Filtro de Kalman - Arena Sintética EKF")
         
-
-
         # Set minimum window size
         self.root.minsize(1400, 750)
         
@@ -29,15 +27,12 @@ class KalmanApp:
         # Video display size default
         self.video_width = 640
         self.video_height = 480
-        # Dimensões reais default
-        self.max_x = 150 # metros
-        self.max_y = 150  # metros
 
         # Localização das torres no mapa (serão lidas do painel)
         self.towers = None 
 
         # Tamanho mínimo do ROI 
-        self.min_window_m = int(self.max_x / 80) # metros
+        self.min_window_m = 0.1 # metros
 
         # Maximize window
         try:
@@ -69,6 +64,9 @@ class KalmanApp:
         self.kalman_windows = []    # Matrizes P de covariância
         self.innov_x = []           # Diferenças de inovação residual
         self.innov_y = []
+
+        # Matrizes P
+        self.P_matrizes = []
 
         # Inicializa a interface gráfica
         self.load_interface()
@@ -294,7 +292,7 @@ class KalmanApp:
     def _build_center_painer(self):
         # --- CENTER PANEL: Single Viewer ---
         self.center_frame = tk.Frame(self.root, bg="#f3f4f6")
-        self.center_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+        self.center_frame.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
 
         # 1. TÍTULO
         viewer_title = tk.Label(self.center_frame, text="🎬 Arena de Simulação EKF", 
@@ -315,13 +313,12 @@ class KalmanApp:
             self.video_height = lh
             
         # Fixamos o Y em 150 metros e calculamos o X para que a escala px/m seja idêntica
-        aspect_ratio = self.video_width / self.video_height
+        self.aspect_ratio = self.video_width / self.video_height
         self.max_y = 150.0
-        self.max_x = self.max_y * aspect_ratio
+        self.max_x = self.max_y * self.aspect_ratio
         
         # Atualiza a janela mínima de ROI com base na nova escala
-        self.min_window_m = int(self.max_x / 80)
-        # =====================================================================
+        self.min_window_m = 0.1
         
         # Agora inicializamos o VideoViewer com as dimensões corretas do monitor
         self.tela_viewer = VideoViewer(viewer_container, width=self.video_width, 
@@ -362,21 +359,18 @@ class KalmanApp:
         legend_container = tk.Frame(info_dashboard, bg="#ffffff")
         legend_container.pack(fill="x", pady=(6, 12))
         
-        # Como ajustamos o aspect_ratio, px_m_x será exatmente igual ao px_m_y
+        # Escala Inicial
         px_m_x = self.video_width / self.max_x if hasattr(self, 'max_x') and self.max_x > 0 else 1.0
         px_m_y = self.video_height / self.max_y if hasattr(self, 'max_y') and self.max_y > 0 else 1.0
         avg_scale_px_m = (px_m_x + px_m_y) / 2.0
         
-        # Obtém o ruído configurado em METROS
         try:
             erro_metros = float(self.detector_noise_entry.get().strip())
         except Exception:
             erro_metros = 1.0
-        
-        # Converte o erro de metros para pixels
         erro_px = erro_metros * avg_scale_px_m
         
-        # Linha 1: Identificação Visual (Cores)
+        # --- Linha 1: Identificação Visual (Cores) ---
         l1_frame = tk.Frame(legend_container, bg="#ffffff")
         l1_frame.pack(anchor="center", pady=2)
         tk.Label(l1_frame, text="📡 Base: 4 Torres", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#d97706").pack(side="left", padx=15)
@@ -384,22 +378,45 @@ class KalmanApp:
         tk.Label(l1_frame, text="🟩 Trajetória Real (GT)", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#16a34a").pack(side="left", padx=15)
         tk.Label(l1_frame, text="🔷 Janela: Incerteza (±3σ)", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#9333ea").pack(side="left", padx=15)
 
-        # Linha 2: Métricas de Escala e Debug
+        # --- Linha 2: Métricas Dinâmicas e Covariância P ---
         l2_frame = tk.Frame(legend_container, bg="#ffffff")
         l2_frame.pack(anchor="center", pady=2)
         
-        # O max_x agora exibirá um número quebrado exato (ex: 150x266.67 m), mostrando a nova largura simulada da arena
-        tk.Label(l2_frame, text=f"📐 Dimensões da Arena: {self.max_x:.1f}x{self.max_y:.1f} m", font=("Segoe UI", 9), bg="#ffffff", fg="#6b7280").pack(side="left", padx=15)
-        
-        if hasattr(self, 'min_window_m'):
-            tk.Label(l2_frame, text=f"🔲 ROI Mín: {self.min_window_m:.2f} m", font=("Segoe UI", 9), bg="#ffffff", fg="#6b7280").pack(side="left", padx=15)
-            
-        tk.Label(l2_frame, text=f"🔎 Escala Exata: {avg_scale_px_m:.2f} px/m", font=("Segoe UI", 9), bg="#ffffff", fg="#6b7280").pack(side="left", padx=15)
+        self.escala_lbl = tk.Label(l2_frame, text=f"🔎 Escala: {avg_scale_px_m:.2f} px/m", font=("Segoe UI", 9), bg="#ffffff", fg="#6b7280")
+        self.escala_lbl.pack(side="left", padx=15)
         
         self.erro_sensor_lbl = tk.Label(l2_frame, text=f"⚡ Erro Distância Simulado: {erro_metros:.2f} m ≈ {erro_px:.2f} px", 
                                         font=("Segoe UI", 9), bg="#ffffff", fg="#6b7280")
         self.erro_sensor_lbl.pack(side="left", padx=15)
 
+        # LABEL PARA AS DIMENSÕES DE P (Atualize durante a simulação)
+        self.p_dim_lbl = tk.Label(l2_frame, text="📏 Dimensões P: X=0.00m, Y=0.00m", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#9333ea")
+        self.p_dim_lbl.pack(side="left", padx=15)
+
+        # --- Linha 3: Controles de Zoom e Atualização de Arena ---
+        l3_frame = tk.Frame(legend_container, bg="#ffffff")
+        l3_frame.pack(anchor="center", pady=4)
+
+        tk.Label(l3_frame, text="Máx X (m):", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#374151").pack(side="left")
+        self.entry_max_x = tk.Entry(l3_frame, width=8, font=("Segoe UI", 9), justify="center")
+        self.entry_max_x.insert(0, str(round(self.max_x, 1)))
+        self.entry_max_x.pack(side="left", padx=(2, 15))
+
+        tk.Label(l3_frame, text="Máx Y (m):", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#374151").pack(side="left")
+        self.entry_max_y = tk.Entry(l3_frame, width=8, font=("Segoe UI", 9), justify="center")
+        self.entry_max_y.insert(0, str(round(self.max_y, 1)))
+        self.entry_max_y.pack(side="left", padx=(2, 15))
+
+        tk.Label(l3_frame, text="ROI Mín (m):", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#374151").pack(side="left")
+        self.entry_min_window = tk.Entry(l3_frame, width=8, font=("Segoe UI", 9), justify="center")
+        self.entry_min_window.insert(0, str(self.min_window_m))
+        self.entry_min_window.pack(side="left", padx=(2, 15))
+
+        btn_zoom_update = tk.Button(l3_frame, text="Atualizar", font=("Segoe UI", 9, "bold"), 
+                                    bg="#10b981", fg="white", relief="flat", cursor="hand2", padx=10, 
+                                    activebackground="#059669", borderwidth=0, command=self._update_arena_dimensions)
+        btn_zoom_update.pack(side="left", padx=5)
+    
     def _build_right_painel(self):
         # --- RIGHT PANEL: Metrics ---
         self.right_frame = tk.Frame(self.root, bg="white")
@@ -490,6 +507,7 @@ class KalmanApp:
         
         try:
             self._parse_config()
+            self.P_matrizes = []
         except Exception as e:
             error_msg = traceback.format_exc()
             self.root.after(0, lambda: messagebox.showerror("Erro", f"Erro nas configurações: {error_msg}"))
@@ -552,6 +570,11 @@ class KalmanApp:
                 mask = np.ones(len(t), dtype=bool)
 
             self.total_frames = len(t)
+            
+            # --- INICIALIZAÇÃO DE HISTÓRICOS E CONTADORES DE TAXAS ---
+            self.P_matrizes = [] 
+            self.total_measurements = 0
+            self.meas_inside_roi = 0
 
             world = World(self.towers, noise_std=self.config_detector_noise_m)
             ekf = Entidy(dt, self.towers, q_diag=self.config_Q, r_diag=self.config_R)
@@ -562,7 +585,9 @@ class KalmanApp:
             os.makedirs("FiltroKalman/src/data", exist_ok=True)
             output_path = "FiltroKalman/src/data/simulacao_arena.mp4"
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-            out = cv2.VideoWriter(output_path, fourcc, self.video_fps, (self.video_width, self.video_height))
+            
+            fps_value = float(self.video_fps) if self.video_fps > 0 else 30.0
+            out = cv2.VideoWriter(output_path, fourcc, fps_value, (self.video_width, self.video_height))
 
             arena_base = np.zeros((self.video_height, self.video_width, 3), dtype=np.uint8)
             for i, (bx, by) in enumerate(self.towers):
@@ -576,7 +601,10 @@ class KalmanApp:
                     break
 
                 gt_x, gt_y = states[i, 0], states[i, 1]
+                
+                # Predição a priori para obter inovação teórica
                 ekf.predict()
+                pred_x, pred_y = ekf.get_position()
 
                 raw_z = None
                 nis_atual = np.nan
@@ -584,10 +612,29 @@ class KalmanApp:
 
                 if mask[i]:
                     raw_z = world.measure_distances(gt_x, gt_y)
-                    ekf.update(raw_z)
+                    self.total_measurements += 1
                     meas_x, meas_y = world.multilaterate(raw_z)
 
-                    # Cálculo seguro do NIS
+                    # --- AVALIAÇÃO DA INOVAÇÃO COMO MÉTRICA DE DESEMPENHO ---
+                    if meas_x is not None and meas_y is not None:
+                        innov_x = meas_x - pred_x
+                        innov_y = meas_y - pred_y
+
+                        if hasattr(ekf, 'P') and ekf.P is not None:
+                            P_pred = ekf.P
+                            std_x_pred = np.sqrt(max(1e-6, P_pred[0, 0]))
+                            std_y_pred = np.sqrt(max(1e-6, P_pred[1, 1]))
+                            
+                            limite_x = max(getattr(self, 'min_window_m', 0), 3 * std_x_pred)
+                            limite_y = max(getattr(self, 'min_window_m', 0), 3 * std_y_pred)
+                            
+                            if (abs(innov_x) <= limite_x) and (abs(innov_y) <= limite_y):
+                                self.meas_inside_roi += 1
+
+                    # Executa a atualização do estado
+                    ekf.update(raw_z)
+
+                    # Cálculo seguro do NIS pós-update baseado nos resíduos do filtro
                     if hasattr(ekf, 'S') and hasattr(ekf, 'y') and ekf.S is not None and ekf.y is not None:
                         try:
                             try:
@@ -603,16 +650,23 @@ class KalmanApp:
                 est_x, est_y = ekf.get_position()
                 P_mat_atual = ekf.P if hasattr(ekf, 'P') else None
                 
+                # --- SALVAR MATRIZES P (DESVIOS DO ESTADO POSTERIORI) ---
+                if P_mat_atual is not None:
+                    std_x = np.sqrt(max(1e-6, P_mat_atual[0, 0]))
+                    std_y = np.sqrt(max(1e-6, P_mat_atual[1, 1]))
+                else:
+                    std_x, std_y = 0.0, 0.0
+                self.P_matrizes.append([std_x, std_y])
+
+                # Adiciona o NIS calculado diretamente na estrutura central de métricas
                 self.metrics.push_frame(gt_x, gt_y, est_x, est_y, meas_x=meas_x, meas_y=meas_y, nis_val=nis_atual, raw_z=raw_z, P_mat=P_mat_atual)
 
                 frame = arena_base.copy()
 
-                # Desenha histórico da trajetória Real (Verde)
                 if self.show_traj_cache:
                     for pt in self.metrics.ground_truth_pts:
                         cv2.circle(frame, self.m_to_px(pt[0], pt[1]), 2, (0, 255, 0), -1)
 
-                # --- NOVO: DESENHA O HISTÓRICO DA TRAJETÓRIA DE KALMAN (Azul claro/fino) ---
                 if show_kalman_traj_cache:
                     for pt in self.metrics.filt_pts:
                         if pt is not None:
@@ -634,8 +688,6 @@ class KalmanApp:
 
                 if self.show_window_cache and P_mat_atual is not None:
                     try:
-                        std_x = np.sqrt(max(1e-6, P_mat_atual[0, 0]))
-                        std_y = np.sqrt(max(1e-6, P_mat_atual[1, 1]))
                         win_x_m = max(self.min_window_m, std_x * 3)
                         win_y_m = max(self.min_window_m, std_y * 3)
                         
@@ -656,16 +708,27 @@ class KalmanApp:
                 else:
                     cv2.circle(frame, (px_gt, py_gt), 6, (0, 0, 100), -1)
 
-                # Desenha a posição atual (Instantânea) do Kalman (Círculo Azul Maior)
                 if self.show_kalman_cache:
                     cv2.circle(frame, self.m_to_px(est_x, est_y), 6, (255, 0, 0), -1)
 
                 out.write(frame)
 
                 if i % 20 == 0:
+                    # Usa de forma isolada a label de progresso de frames (status_lbl) sem tocar em nis_lbl
                     self.root.after(0, lambda idx=i: self.status_lbl.config(text=f"Processando frame {idx}/{self.total_frames}..."))
 
             self.processed_video_path = output_path
+
+            # --- ATUALIZAÇÃO DINÂMICA DAS METRICAS REAIS OBTIDAS ---
+            if self.total_frames > 0:
+                self.detection_rate = (self.total_measurements / self.total_frames) * 100.0
+            else:
+                self.detection_rate = 100.0
+
+            if self.total_measurements > 0:
+                self.inlier_rate = (self.meas_inside_roi / self.total_measurements) * 100.0
+            else:
+                self.inlier_rate = 100.0
 
         except Exception as e:
             msg = traceback.format_exc()
@@ -674,8 +737,9 @@ class KalmanApp:
             self.processing = False
             if out is not None:
                 out.release()
+            # Esta chamada agora receberá a estrutura preenchida e interpretará o NIS sem interferências
             self.root.after(0, self._update_ui_metrics_and_complete)
-    
+            
     def save_results(self):
         """Salva gráficos detalhados, relatório e dados brutos em CSV em src/results/"""
         if not hasattr(self, 'metrics') or not self.metrics.filt_pts or not self.metrics.ground_truth_pts:
@@ -954,6 +1018,13 @@ class KalmanApp:
         self.root.after(0, lambda: self.rmse_lbl.config(text=f"RMS (X|Y): {rmse_x:.2f} | {rmse_y:.2f} m"))
         self.root.after(0, lambda: self.mean_err_lbl.config(text=f"E_m (X|Y): {mean_err_x:+.2f} | {mean_err_y:+.2f} m"))
         self.root.after(0, lambda: self.nis_lbl.config(text=f"NIS_m: {mean_nis:.2f} (esp ~{esp_nis:.0f})"))
+
+        curr_idx = self.current_frame_idx
+        if curr_idx < len(self.P_matrizes):
+            dim_x_P, dim_y_P = self.P_matrizes[curr_idx]
+            self.p_dim_lbl.config(text=f"📏 Dimensões P: X={dim_x_P:.2f}m, Y={dim_y_P:.2f}m")
+        else:
+            self.p_dim_lbl.config(text="📏 Dimensões P: N/A")
         
         # --- 5. CÁLCULO E FORMATAÇÃO DO TEMPO DO VÍDEO ---
         fps = getattr(self, 'video_fps', 30.0)
@@ -997,8 +1068,14 @@ class KalmanApp:
         # Estatísticas
         mean_err_x = np.mean(signed_dx) if signed_dx else 0.0
         mean_err_y = np.mean(signed_dy) if signed_dy else 0.0
-        self.detection_rate = 100.0  # ou calcule com base nos raw_z válidos
-        self.inlier_rate = 100.0
+        
+        # Cálculo das taxas reais com base nas medições e inliers processados
+        total_fr = self.total_frames if hasattr(self, 'total_frames') and self.total_frames > 0 else len(self.metrics.ground_truth_pts)
+        total_meas = getattr(self, 'total_measurements', 0)
+        inliers_count = getattr(self, 'meas_inside_roi', 0)
+
+        self.detection_rate = (total_meas / total_fr * 100.0) if total_fr > 0 else 0.0
+        self.inlier_rate = (inliers_count / total_meas * 100.0) if total_meas > 0 else 0.0
         
         # NIS médio (ignorando NaNs e Infinitos)
         valid_nis = [n for n in self.metrics.nis_vals if not np.isnan(n) and not np.isinf(n)]
@@ -1046,7 +1123,7 @@ class KalmanApp:
         
         # Habilita botão de salvar e inicia exibição do vídeo
         self._on_processing_complete()
-    
+        
     def _find_convergence_frame(self, running_rms, final_val, tol=0.05, min_stable=10):
         if final_val is None or len(running_rms) < min_stable: return None
         threshold = final_val * (1 + tol)
@@ -1063,6 +1140,10 @@ class KalmanApp:
         - R: Medição (4 valores, um para cada torre)
         - Torres: Lê as coordenadas X e Y das 4 bases na UI.
         """
+        self.P_matrizes = []          # Cada elemento: [sqrt(P[0,0]), sqrt(P[1,1])]
+        self.meas_inside_roi = 0      # Número de medições consideradas inliers
+        self.total_measurements = 0   # Número total de medições recebidas (quando mask[i] == True)
+
         # 1. Parse Q (Modelo PVA -> 6 estados: x, y, vx, vy, ax, ay)
         q_vals = []
         entries_q = getattr(self, 'q_entries', [])
@@ -1259,6 +1340,44 @@ class KalmanApp:
         # Inverte o eixo Y para o OpenCV
         py = int(self.video_height - (y_m * (self.video_height / self.max_y)))
         return px, py
+
+    def _update_arena_dimensions(self):
+        """Atualiza os valores de zoom e a escala em tempo real baseando-se nos inputs do usuário."""
+        try:
+            # Coleta os valores digitados
+            novo_max_x = float(self.entry_max_x.get().strip())
+            novo_max_y = float(self.entry_max_y.get().strip())
+            novo_min_win = float(self.entry_min_window.get().strip())
+            
+            # Atualiza variáveis de classe
+            self.max_x = novo_max_x 
+            self.max_y = novo_max_y * self.aspect_ratio
+            self.min_window_m = novo_min_win
+            
+            # Recalcula a nova escala
+            px_m_x = self.video_width / self.max_x if self.max_x > 0 else 1.0
+            px_m_y = self.video_height / self.max_y if self.max_y > 0 else 1.0
+            avg_scale_px_m = (px_m_x + px_m_y) / 2.0
+            
+            # Recalcula a estimativa de erro de px baseado na nova escala
+            try:
+                erro_metros = float(self.detector_noise_entry.get().strip())
+            except Exception:
+                erro_metros = 1.0
+            erro_px = erro_metros * avg_scale_px_m
+            
+            # Atualiza os labels de informações
+            self.escala_lbl.config(text=f"🔎 Escala: {avg_scale_px_m:.2f} px/m")
+            self.erro_sensor_lbl.config(text=f"⚡ Erro Distância Simulado: {erro_metros:.2f} m ≈ {erro_px:.2f} px")
+            
+            print(f"Zoom atualizado: Max X={self.max_x}m, Max Y={self.max_y}m, ROI={self.min_window_m}m")
+            
+            # Opcional: Se você estiver parado em um frame (pausado), pode querer chamar 
+            # sua função que renderiza o frame atual aqui, para que o zoom aplique imediatamente na tela.
+            # ex: self.update_frame_display() 
+            
+        except ValueError:
+            print("Erro: Insira apenas valores numéricos válidos nos campos de Zoom.")
 
 def run_app():
     root = tk.Tk()
