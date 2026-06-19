@@ -52,11 +52,13 @@ class KalmanApp:
         self.paused = False
         self.current_frame_idx = 0
         self.total_frames = 0
-        self.video_fps = 60.0 # FPS padrão da simulação
-        
+        self.video_fps = 30 # FPS padrão da simulação
+        self.duration = 40
+
         # Métricas de avaliação e controle da UI
         self.detection_rate = 0.0  
         self.meas_inside_roi = 0 
+
 
         self.metrics = MetricsManager()
 
@@ -99,20 +101,36 @@ class KalmanApp:
 
         # build painel
         self._build_left_painel()
-        self._build_center_painer()
+        self._build_center_painel()
         self._build_right_painel()
 
         # Playback poll
         self.root.after(33, self._poll_playback)
     
     def _build_left_painel(self):
-        ### --- LEFT PANEL: Settings, Trajectory, Bases & Metrics ---
+        ### --- LEFT PANEL: Settings, Trajectory, Bases & Sim Config ---
         self.root.grid_rowconfigure(0, weight=1) 
         
         self.left_frame = tk.Frame(self.root, bg="white", width=300)
         self.left_frame.grid(row=0, column=0, sticky="nsew")
-
         self.left_frame.pack_propagate(False)
+
+        # Garantir valores padrão de inicialização
+        if not hasattr(self, 'duration'): self.duration = 20.0
+        if not hasattr(self, 'fps'): self.fps = 30
+        if not hasattr(self, 'min_window_m'): self.min_window_m = 0.1
+
+        # --- PADRÃO DE ESTILO PARA BOTÕES (Verde com texto branco) ---
+        btn_style = {
+            "font": ("Segoe UI", 9, "bold"),
+            "bg": "#10b981", 
+            "fg": "white", 
+            "activebackground": "#059669",
+            "activeforeground": "white",
+            "relief": "flat", 
+            "cursor": "hand2",
+            "borderwidth": 0
+        }
 
         # ===== SECTION 1: Escolha da Trajetória =====
         traj_lbl_frame = tk.LabelFrame(self.left_frame, text="🛤 Trajetória do Alvo", 
@@ -128,29 +146,41 @@ class KalmanApp:
         self.traj_params_frame = tk.Frame(traj_lbl_frame, bg="#f5f5f5")
         self.traj_params_frame.pack(fill="x", pady=2)
 
-        # ===== SECTION 1.5: Bases de Observação (4 Torres) =====
-        bases_lbl_frame = tk.LabelFrame(self.left_frame, text="📡 Posição das 4 Bases (m)", 
-                                        font=("Segoe UI", 9, "bold"), bg="#f5f5f5", fg="#333333", padx=8, pady=2)
+        # ===== SECTION 1.5: Bases de Observação (4 Torres) em 2 Colunas =====
+        bases_lbl_frame = tk.LabelFrame(self.left_frame, text="📡 Posição das Bases (m)", 
+                                        font=("Segoe UI", 9, "bold"), bg="#f5f5f5", fg="#333333", padx=4, pady=2)
         bases_lbl_frame.pack(fill="x", padx=8, pady=1)
 
         self.base_entries = []
-        w_def = 180
-        h_def = 120
-        c_def = 10
+        self.base_active_vars = [] 
 
-        default_bases = [(c_def, c_def), (c_def+w_def, c_def), (c_def+w_def, c_def+h_def), (c_def, c_def+h_def)] # Bases padrão
+        w_def, h_def, c_def = 180, 120, 10
+        default_bases = [(c_def, c_def), (c_def+w_def, c_def), (c_def+w_def, c_def+h_def), (c_def, c_def+h_def)] 
+
+        bases_lbl_frame.columnconfigure(0, weight=1)
+        bases_lbl_frame.columnconfigure(1, weight=1)
+
         for i in range(4):
+            row = i // 2
+            col = i % 2
+            
             f = tk.Frame(bases_lbl_frame, bg="#f5f5f5")
-            f.pack(fill="x", pady=1)
-            tk.Label(f, text=f"B{i+1} (x,y):", font=("Segoe UI", 8), bg="#f5f5f5").pack(side="left")
+            f.grid(row=row, column=col, sticky="w", padx=2, pady=2)
             
-            ex = ttk.Entry(f, width=5)
+            var = tk.BooleanVar(value=True)
+            self.base_active_vars.append(var)
+            chk = tk.Checkbutton(f, variable=var, bg="#f5f5f5", activebackground="#f5f5f5", cursor="hand2")
+            chk.pack(side="left")
+            
+            tk.Label(f, text=f"B{i+1}:", font=("Segoe UI", 8, "bold"), bg="#f5f5f5").pack(side="left")
+            
+            ex = ttk.Entry(f, width=4)
             ex.insert(0, str(default_bases[i][0]))
-            ex.pack(side="left", padx=2)
+            ex.pack(side="left", padx=(2, 1))
             
-            ey = ttk.Entry(f, width=5)
+            ey = ttk.Entry(f, width=4)
             ey.insert(0, str(default_bases[i][1]))
-            ey.pack(side="left", padx=2)
+            ey.pack(side="left", padx=1)
             
             self.base_entries.append((ex, ey))
 
@@ -176,8 +206,7 @@ class KalmanApp:
         
         self.q_entries = []
         for i, label in enumerate(q_labels):
-            c = i % 3
-            r = i // 3
+            c = i % 3; r = i // 3
             lbl = tk.Label(q_frame, text=label, font=("Segoe UI", 7), bg="#f5f5f5")
             lbl.grid(row=r*2, column=c, sticky="w", padx=1, pady=0)
             
@@ -195,13 +224,12 @@ class KalmanApp:
         r_frame = tk.Frame(config_lbl_frame, bg="#f5f5f5")
         r_frame.pack(fill="x", pady=(0, 1))
         
-        r_labels = ["R[0,0]", "R[1,1]", "R[2,2]", "R[3,3]"] # Alterado para 4, pois agora são 4 bases de distância
+        r_labels = ["R[0,0]", "R[1,1]", "R[2,2]", "R[3,3]"] 
         default_r_vals = ["1.4", "1.4", "1.4", "1.4"]
         
         self.r_entries = []
         for i, label in enumerate(r_labels):
-            c = i % 2 
-            r = i // 2
+            c = i % 2; r = i // 2
             lbl = tk.Label(r_frame, text=label, font=("Segoe UI", 7), bg="#f5f5f5")
             lbl.grid(row=r*2, column=c, sticky="w", padx=1, pady=0)
             
@@ -213,7 +241,46 @@ class KalmanApp:
         r_frame.columnconfigure(0, weight=1)
         r_frame.columnconfigure(1, weight=1)
 
-        # ===== SECTION 3: Opções de Debug =====
+        self.autotune_btn = tk.Button(config_lbl_frame, text="⚙ Autosintonia", command=self.autotuning_processing, padx=6, pady=5, **btn_style)
+        self.autotune_btn.pack(fill="x", pady=(6, 2))
+        self.autotune_btn.config(state="disabled") # Mantém desabilitado no início
+
+        # ===== SECTION 3: Configurações da Simulação  =====
+        sim_lbl_frame = tk.LabelFrame(self.left_frame, text="⏱ Configurações da Simulação", 
+                                        font=("Segoe UI", 9, "bold"), bg="#f5f5f5", fg="#333333", padx=8, pady=4)
+        sim_lbl_frame.pack(fill="x", padx=8, pady=1)
+
+        sim_lbl_frame.columnconfigure(0, weight=1)
+        sim_lbl_frame.columnconfigure(1, weight=1)
+
+        # Estilo uniforme para os labels desta seção
+        padrao_lbl_sim = {"font": ("Segoe UI", 8, "bold"), "bg": "#f5f5f5", "fg": "#374151"}
+
+        # Linha 0: Tempo
+        tk.Label(sim_lbl_frame, text="Tempo da simulação (segundos):", **padrao_lbl_sim).grid(row=0, column=0, sticky="w", pady=2)
+        self.entry_duration = tk.Entry(sim_lbl_frame, width=8, font=("Segoe UI", 9), justify="center")
+        self.entry_duration.insert(0, str(self.duration))
+        self.entry_duration.grid(row=0, column=1, sticky="e", pady=2)
+
+        # Linha 1: FPS
+        tk.Label(sim_lbl_frame, text="FPS da simulação:", **padrao_lbl_sim).grid(row=1, column=0, sticky="w", pady=2)
+        self.entry_fps = tk.Entry(sim_lbl_frame, width=8, font=("Segoe UI", 9), justify="center")
+        self.entry_fps.insert(0, str(self.fps))
+        self.entry_fps.grid(row=1, column=1, sticky="e", pady=2)
+
+        # Linha 2: ROI Mínimo
+        tk.Label(sim_lbl_frame, text="Região de interesse (ROI) mínima (m):", **padrao_lbl_sim).grid(row=2, column=0, sticky="w", pady=2)
+        self.entry_min_window = tk.Entry(sim_lbl_frame, width=8, font=("Segoe UI", 9), justify="center")
+        self.entry_min_window.insert(0, str(self.min_window_m))
+        self.entry_min_window.grid(row=2, column=1, sticky="e", pady=2)
+
+        # Linah 3: Seed
+        tk.Label(sim_lbl_frame, text="Seed da aleatoriedade (0=Auto):", **padrao_lbl_sim).grid(row=3, column=0, sticky="w", pady=2)
+        self.entry_seed = tk.Entry(sim_lbl_frame, width=8, font=("Segoe UI", 9), justify="center")
+        self.entry_seed.insert(0, "42") # Valor clássico 42 como padrão
+        self.entry_seed.grid(row=3, column=1, sticky="e", pady=2)
+
+        # ===== SECTION 4: Opções de Debug =====
         debug_lbl_frame = tk.LabelFrame(self.left_frame, text="🔍 Opções de Debug", 
                                         font=("Segoe UI", 9, "bold"), bg="#f5f5f5", fg="#333333", padx=8, pady=2)
         debug_lbl_frame.pack(fill="x", padx=8, pady=1)
@@ -221,87 +288,42 @@ class KalmanApp:
         ttk.Checkbutton(debug_lbl_frame, text="Desenhar trajetória real", variable=self.show_traj).pack(anchor="w")
         ttk.Checkbutton(debug_lbl_frame, text="Desenhar torres de medição", variable=self.show_detect).pack(anchor="w")
         ttk.Checkbutton(debug_lbl_frame, text="Desenhar Kalman (Atual)", variable=self.show_kalman).pack(anchor="w")
-        ttk.Checkbutton(debug_lbl_frame, text="Desenhar trajetória de Kalman", variable=self.show_kalman_traj).pack(anchor="w") # <-- ADICIONADO AQUI
+        ttk.Checkbutton(debug_lbl_frame, text="Desenhar trajetória de Kalman", variable=self.show_kalman_traj).pack(anchor="w") 
         ttk.Checkbutton(debug_lbl_frame, text="Desenhar Janela de Incerteza", variable=self.show_window).pack(anchor="w")
 
-        # ===== SECTION 4: Status e Métricas =====
-        info_lbl_frame = tk.LabelFrame(self.left_frame, text="📊 Status e Métricas", 
-                                       font=("Segoe UI", 9, "bold"), bg="#f5f5f5", fg="#333333", padx=8, pady=4)
-        info_lbl_frame.pack(fill="x", padx=8, pady=2)
-
-        # Configura as colunas para dividirem o espaço igualmente
-        info_lbl_frame.grid_columnconfigure(0, weight=1)
-        info_lbl_frame.grid_columnconfigure(1, weight=1)
-
-        # --- Linha 0: Status (Ocupa as duas colunas para destaque) ---
-        self.status_lbl = tk.Label(info_lbl_frame, text="Status: Aguardando", 
-                                   font=("Segoe UI", 8, "bold"), fg="#16a34a", bg="#f5f5f5")
-        self.status_lbl.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
-
-        # --- Linha 1: Taxas ---
-        self.det_rate_lbl = tk.Label(info_lbl_frame, text="Tx. Detec: --%", 
-                                     font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
-        self.det_rate_lbl.grid(row=1, column=0, sticky="w", pady=1)
-
-        self.inlier_rate_lbl = tk.Label(info_lbl_frame, text="Inliers : --%", 
-                                        font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
-        self.inlier_rate_lbl.grid(row=1, column=1, sticky="w", pady=1)
-
-        # --- Linha 2: Erros ---
-        self.rmse_lbl = tk.Label(info_lbl_frame, text="RMSE (X|Y): --|-- m", 
-                                 font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
-        self.rmse_lbl.grid(row=2, column=0, sticky="w", pady=1)
-
-        self.mean_err_lbl = tk.Label(info_lbl_frame, text="E_med: --|-- m", 
-                                     font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
-        self.mean_err_lbl.grid(row=2, column=1, sticky="w", pady=1)
-
-        # --- Linha 3: NIS e Regime Estacionário ---
-        self.nis_lbl = tk.Label(info_lbl_frame, text="NIS_m: --", 
-                               font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
-        self.nis_lbl.grid(row=3, column=0, sticky="w", pady=1)
-
-        self.steady_state_lbl = tk.Label(info_lbl_frame, text="Reg. Est.: -- s (-- fr)", 
-                                         font=("Segoe UI", 8), fg="#4b5563", bg="#f5f5f5")
-        self.steady_state_lbl.grid(row=3, column=1, sticky="w", pady=1)
-
-        # ===== SPACER: Garante o uso de todo o height útil =====
+        # ===== SPACER =====
         spacer = tk.Frame(self.left_frame, bg="white")
         spacer.pack(fill="both", expand=True)
 
-        # ===== SECTION 5: EXEC & SAVE Buttons =====
+        # ===== SECTION 5: ACTION BUTTONS (EXEC & SAVE) =====
         exec_lbl_frame = tk.Frame(self.left_frame, bg="white")
         exec_lbl_frame.pack(side="bottom", fill="x", padx=8, pady=(4, 8))
 
         btn_frame = tk.Frame(exec_lbl_frame, bg="white")
         btn_frame.pack(fill="x")
 
-        # ATENÇÃO: Botão de executar agora inicia HABILITADO ("normal") em vez de "disabled"
-        self.exec_btn = tk.Button(btn_frame, text="▶ EXEC", command=self.execute_processing, 
-                                font=("Segoe UI", 9, "bold"), bg="#333333", fg="white", 
-                                relief="flat", padx=10, pady=8, cursor="hand2", state="normal")
+        self.exec_btn = tk.Button(btn_frame, text="▶ EXEC", command=self.execute_processing, padx=10, pady=8, **btn_style)
         self.exec_btn.pack(side="left", fill="x", expand=True, padx=(0, 3))
 
-        self.save_btn = tk.Button(btn_frame, text="💾 Salvar", command=self.save_results, 
-                                font=("Segoe UI", 9, "bold"), bg="#666666", fg="white", 
-                                relief="flat", padx=10, pady=8, cursor="hand2", state="disabled")
+        self.save_btn = tk.Button(btn_frame, text="💾 Salvar", command=self.save_results, padx=10, pady=8, **btn_style)
         self.save_btn.pack(side="right", fill="x", expand=True, padx=(3, 0))
+        self.save_btn.config(state="disabled") # Mantém desabilitado no início
 
         self._on_trajectory_change()
 
-    def _build_center_painer(self):
-        # --- CENTER PANEL: Single Viewer ---
+    def _build_center_painel(self):
+        # --- CENTER PANEL: Single Viewer & Widescreen Optimized Dashboard ---
         self.center_frame = tk.Frame(self.root, bg="#f3f4f6")
         self.center_frame.grid(row=0, column=1, sticky="nsew", padx=0, pady=0)
 
-        # 1. TÍTULO
-        viewer_title = tk.Label(self.center_frame, text="🎬 Arena de Simulação EKF", 
-                            font=("Segoe UI", 14, "bold"), bg="#f3f4f6", fg="#1f2937")
-        viewer_title.pack(fill="x", pady=(0, 10))
+        # 1. TÍTULO DO PAINEL (Padding vertical reduzido)
+        viewer_title = tk.Label(self.center_frame, text="🎬 Arena de Simulação & Análise EKF", 
+                                font=("Segoe UI", 12, "bold"), bg="#f3f4f6", fg="#1f2937")
+        viewer_title.pack(fill="x", pady=(6, 4))
         
-        # 2. VIEWER CONTAINER
+        # 2. VIEWER CONTAINER (Arena de Vídeo - Intacto conforme o original)
         viewer_container = tk.Frame(self.center_frame, bg="#000000", bd=0, highlightthickness=1, highlightbackground="#d1d5db")
-        viewer_container.pack(fill="both", expand=True, pady=(0, 15))
+        viewer_container.pack(fill="both", expand=True, pady=(0, 4))
 
         self.root.update_idletasks()
         
@@ -312,111 +334,150 @@ class KalmanApp:
             self.video_width = lw
             self.video_height = lh
             
-        # Fixamos o Y em 150 metros e calculamos o X para que a escala px/m seja idêntica
         self.aspect_ratio = self.video_width / self.video_height
         self.max_y = 150.0
         self.max_x = self.max_y * self.aspect_ratio
-        
-        # Atualiza a janela mínima de ROI com base na nova escala
         self.min_window_m = 0.1
+
+        if hasattr(self, 'entry_max_x') and hasattr(self, 'entry_max_y'):
+            self.entry_max_x.delete(0, tk.END)
+            self.entry_max_x.insert(0, str(round(self.max_x, 1)))
+            self.entry_max_y.delete(0, tk.END)
+            self.entry_max_y.insert(0, str(round(self.max_y, 1)))
         
-        # Agora inicializamos o VideoViewer com as dimensões corretas do monitor
         self.tela_viewer = VideoViewer(viewer_container, width=self.video_width, 
                                     height=self.video_height, bg="black")
         self.tela_viewer.pack(fill="both", expand=True)
 
-        # 3. PLAYBACK CONTROLS
+        # 3. PLAYBACK CONTROLS (Novo Estilo de Video Player)
         controls_frame = tk.Frame(self.center_frame, bg="#f3f4f6")
-        controls_frame.pack(fill="x", pady=(0, 15))
+        controls_frame.pack(fill="x", pady=(0, 6), padx=10)
         
-        controls_inner = tk.Frame(controls_frame, bg="#f3f4f6")
-        controls_inner.pack(anchor="center")
+        # --- Linha do Tempo (Barra de Progresso e Tempo) ---
+        timeline_frame = tk.Frame(controls_frame, bg="#f3f4f6")
+        timeline_frame.pack(fill="x", pady=(0, 4))
+        
+        self.video_progress_canvas = tk.Canvas(timeline_frame, height=20, bg="#f3f4f6", highlightthickness=0, cursor="hand2")
+        self.video_progress_canvas.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        
+        # Binds para capturar os cliques e arrastes do mouse na barra
+        self.video_progress_canvas.bind("<Button-1>", self._on_canvas_click)
+        self.video_progress_canvas.bind("<B1-Motion>", self._on_canvas_drag)
+        self.video_progress_canvas.bind("<Configure>", self._draw_canvas_slider)
+        
+        self.time_info_lbl = tk.Label(timeline_frame, text="00:00 / 00:00", 
+                                      font=("Segoe UI", 9, "bold"), fg="#374151", bg="#f3f4f6")
+        self.time_info_lbl.pack(side="right")
+        
+        # --- Botões de Playback (Centralizados abaixo da barra) ---
+        buttons_frame = tk.Frame(controls_frame, bg="#f3f4f6")
+        buttons_frame.pack(anchor="center")
         
         btn_opts = {
-            "font": ("Segoe UI", 10, "bold"), "bg": "#374151", "fg": "white", 
-            "relief": "flat", "padx": 16, "pady": 6, "cursor": "hand2",
+            "font": ("Segoe UI", 9, "bold"), "bg": "#374151", "fg": "white", 
+            "relief": "flat", "padx": 12, "pady": 3, "cursor": "hand2",
             "activebackground": "#4b5563", "borderwidth": 0
         }
         
-        self.prev_btn = tk.Button(controls_inner, text="◄ Anterior", command=self.prev_frame, state="disabled", **btn_opts)
-        self.prev_btn.grid(row=0, column=0, padx=8)
+        self.prev_btn = tk.Button(buttons_frame, text="◄ Anterior", command=self.prev_frame, state="disabled", **btn_opts)
+        self.prev_btn.grid(row=0, column=0, padx=4)
         
-        self.play_btn = tk.Button(controls_inner, text="⏵ Play", command=self.toggle_playback, state="disabled", **btn_opts)
-        self.play_btn.grid(row=0, column=1, padx=8)
+        self.play_btn = tk.Button(buttons_frame, text="⏵ Iniciar", command=self.toggle_playback, state="disabled", **btn_opts)
+        self.play_btn.grid(row=0, column=1, padx=4)
         
-        self.next_btn = tk.Button(controls_inner, text="Próximo ►", command=self.next_frame, state="disabled", **btn_opts)
-        self.next_btn.grid(row=0, column=2, padx=8)
+        self.next_btn = tk.Button(buttons_frame, text="Próximo ►", command=self.next_frame, state="disabled", **btn_opts)
+        self.next_btn.grid(row=0, column=2, padx=4)
 
-        self.time_info_lbl = tk.Label(controls_inner, text="00:00 / 00:00", 
-                                    font=("Segoe UI", 11, "bold"), fg="#374151", bg="#f3f4f6")
-        self.time_info_lbl.grid(row=0, column=3, padx=(20, 0))
+        # 4. DASHBOARD HORIZONTAL DE MÉTRICAS (Design Inteligente de Baixo Perfil)
+        dashboard_container = tk.Frame(self.center_frame, bg="#ffffff", bd=1, relief="solid")
+        dashboard_container.config(highlightbackground="#e5e7eb", highlightcolor="#e5e7eb")
+        dashboard_container.pack(fill="x", padx=10, pady=(0, 6))
+        
+        # --- LINHA SUPERIOR COMPACTA: Status, Barra de Progresso e Legendas lado a lado ---
+        top_bar = tk.Frame(dashboard_container, bg="#ffffff", padx=10, pady=4)
+        top_bar.pack(fill="x")
+        
+        # Bloco de Status à Esquerda
+        status_sub_frame = tk.Frame(top_bar, bg="#ffffff")
+        status_sub_frame.pack(side="left", anchor="w")
+        
+        self.status_lbl = tk.Label(status_sub_frame, text="Status: Aguardando Inicialização", 
+                                   font=("Segoe UI", 9, "bold"), fg="#1e3a8a", bg="#ffffff")
+        self.status_lbl.pack(side="left", padx=(0, 8))
+        
+        self.sim_progress = ttk.Progressbar(status_sub_frame, orient="horizontal", mode="determinate", length=150)
+        self.sim_progress.pack(side="left")
 
-        # 4. DASHBOARD DE INFORMAÇÕES
-        info_dashboard = tk.Frame(self.center_frame, bg="#ffffff", bd=1, relief="solid", highlightthickness=0)
-        info_dashboard.config(highlightbackground="#d1d5db", highlightcolor="#d1d5db")
-        info_dashboard.pack(fill="x", pady=(0, 0))
+        # Bloco de Legendas à Direita (Aproveitando a largura)
+        legend_sub_frame = tk.Frame(top_bar, bg="#ffffff")
+        legend_sub_frame.pack(side="right", anchor="e")
+        tk.Label(legend_sub_frame, text="📡 Torres Base", font=("Segoe UI", 8, "bold"), bg="#ffffff", fg="#d97706").pack(side="left", padx=6)
+        tk.Label(legend_sub_frame, text="🟦 EKF Estimado", font=("Segoe UI", 8, "bold"), bg="#ffffff", fg="#2563eb").pack(side="left", padx=6)
+        tk.Label(legend_sub_frame, text="🟩 Real (Truth)", font=("Segoe UI", 8, "bold"), bg="#ffffff", fg="#16a34a").pack(side="left", padx=6)
+        tk.Label(legend_sub_frame, text="🔷 Incerteza (±3σ)", font=("Segoe UI", 8, "bold"), bg="#ffffff", fg="#9333ea").pack(side="left", padx=6)
+
+        # Divisor horizontal discreto
+        sep = ttk.Separator(dashboard_container, orient="horizontal")
+        sep.pack(fill="x", padx=8, pady=2)
+
+        # --- GRID DE METRICAS: Distribuição em 3 Colunas Simétricas ---
+        metrics_grid = tk.Frame(dashboard_container, bg="#ffffff", padx=10, pady=4)
+        metrics_grid.pack(fill="x", pady=(0, 4))
         
-        legend_container = tk.Frame(info_dashboard, bg="#ffffff")
-        legend_container.pack(fill="x", pady=(6, 12))
-        
-        # Escala Inicial
+        # Configura 3 colunas balanceadas que se expandem horizontalmente
+        metrics_grid.grid_columnconfigure(0, weight=1, uniform="metrics_col")
+        metrics_grid.grid_columnconfigure(1, weight=1, uniform="metrics_col")
+        metrics_grid.grid_columnconfigure(2, weight=1, uniform="metrics_col")
+
+        # Cálculos de Escala e Ruído
         px_m_x = self.video_width / self.max_x if hasattr(self, 'max_x') and self.max_x > 0 else 1.0
         px_m_y = self.video_height / self.max_y if hasattr(self, 'max_y') and self.max_y > 0 else 1.0
         avg_scale_px_m = (px_m_x + px_m_y) / 2.0
-        
         try:
             erro_metros = float(self.detector_noise_entry.get().strip())
         except Exception:
             erro_metros = 1.0
         erro_px = erro_metros * avg_scale_px_m
+
+        # --- FILA 1: Parametrização do Cenário de Simulação ---
+        self.escala_lbl = tk.Label(metrics_grid, text=f"📐 Escala Espacial Ativa: {avg_scale_px_m:.2f} px/m", 
+                                   font=("Segoe UI", 9), bg="#ffffff", fg="#4b5563")
+        self.escala_lbl.grid(row=0, column=0, sticky="w", pady=2)
         
-        # --- Linha 1: Identificação Visual (Cores) ---
-        l1_frame = tk.Frame(legend_container, bg="#ffffff")
-        l1_frame.pack(anchor="center", pady=2)
-        tk.Label(l1_frame, text="📡 Base: 4 Torres", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#d97706").pack(side="left", padx=15)
-        tk.Label(l1_frame, text="🟦 Kalman: Estimado", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#2563eb").pack(side="left", padx=15)
-        tk.Label(l1_frame, text="🟩 Trajetória Real (GT)", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#16a34a").pack(side="left", padx=15)
-        tk.Label(l1_frame, text="🔷 Janela: Incerteza (±3σ)", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#9333ea").pack(side="left", padx=15)
+        self.erro_sensor_lbl = tk.Label(metrics_grid, text=f"⚡ Ruído Nominal do Sensor: {erro_metros:.2f} m (≈ {erro_px:.2f} px)", 
+                                        font=("Segoe UI", 9), bg="#ffffff", fg="#4b5563")
+        self.erro_sensor_lbl.grid(row=0, column=1, sticky="w", pady=2)
 
-        # --- Linha 2: Métricas Dinâmicas e Covariância P ---
-        l2_frame = tk.Frame(legend_container, bg="#ffffff")
-        l2_frame.pack(anchor="center", pady=2)
+        self.p_dim_lbl = tk.Label(metrics_grid, text="🔮 Incerteza de Crença (P): dX = 0.00m | dY = 0.00m", 
+                                  font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#6d28d9")
+        self.p_dim_lbl.grid(row=0, column=2, sticky="w", pady=2)
+
+        # --- FILA 2: Aquisição de Sinais e Validação ---
+        self.det_rate_lbl = tk.Label(metrics_grid, text="📊 Eficiência de Detecção do Sensor: --%", 
+                                     font=("Segoe UI", 9), fg="#374151", bg="#ffffff")
+        self.det_rate_lbl.grid(row=1, column=0, sticky="w", pady=2)
+
+        self.inlier_rate_lbl = tk.Label(metrics_grid, text="🎯 Índice de Inliers Filtrados (Consistência): --%", 
+                                        font=("Segoe UI", 9), fg="#374151", bg="#ffffff")
+        self.inlier_rate_lbl.grid(row=1, column=1, sticky="w", pady=2)
+
+        self.nis_lbl = tk.Label(metrics_grid, text="📋 Métrica de Consistência Estatística (NIS): --", 
+                                font=("Segoe UI", 9), fg="#374151", bg="#ffffff")
+        self.nis_lbl.grid(row=1, column=2, sticky="w", pady=2)
+
+        # --- FILA 3: Métricas de Erro e Estabilidade ---
+        self.rmse_lbl = tk.Label(metrics_grid, text="📉 Erro Quadrático Médio (RMSE): X = -- m | Y = -- m", 
+                                 font=("Segoe UI", 9), fg="#374151", bg="#ffffff")
+        self.rmse_lbl.grid(row=2, column=0, sticky="w", pady=2)
+
+        self.mean_err_lbl = tk.Label(metrics_grid, text="📐 Desvio Médio Absoluto (E_méd): X = -- m | Y = -- m", 
+                                     font=("Segoe UI", 9), fg="#374151", bg="#ffffff")
+        self.mean_err_lbl.grid(row=2, column=1, sticky="w", pady=2)
+
+        self.steady_state_lbl = tk.Label(metrics_grid, text="⏱ Tempo para Regime Estacionário: -- s (-- fr)", 
+                                         font=("Segoe UI", 9), fg="#374151", bg="#ffffff")
+        self.steady_state_lbl.grid(row=2, column=2, sticky="w", pady=2)
         
-        self.escala_lbl = tk.Label(l2_frame, text=f"🔎 Escala: {avg_scale_px_m:.2f} px/m", font=("Segoe UI", 9), bg="#ffffff", fg="#6b7280")
-        self.escala_lbl.pack(side="left", padx=15)
-        
-        self.erro_sensor_lbl = tk.Label(l2_frame, text=f"⚡ Erro Distância Simulado: {erro_metros:.2f} m ≈ {erro_px:.2f} px", 
-                                        font=("Segoe UI", 9), bg="#ffffff", fg="#6b7280")
-        self.erro_sensor_lbl.pack(side="left", padx=15)
-
-        # LABEL PARA AS DIMENSÕES DE P (Atualize durante a simulação)
-        self.p_dim_lbl = tk.Label(l2_frame, text="📏 Crença (P): dX=0.00m, dY=0.00m", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#9333ea")
-        self.p_dim_lbl.pack(side="left", padx=15)
-
-        # --- Linha 3: Controles de Zoom e Atualização de Arena ---
-        l3_frame = tk.Frame(legend_container, bg="#ffffff")
-        l3_frame.pack(anchor="center", pady=4)
-
-        tk.Label(l3_frame, text="Máx X (m):", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#374151").pack(side="left")
-        self.entry_max_x = tk.Entry(l3_frame, width=8, font=("Segoe UI", 9), justify="center")
-        self.entry_max_x.insert(0, str(round(self.max_x, 1)))
-        self.entry_max_x.pack(side="left", padx=(2, 15))
-
-        tk.Label(l3_frame, text="Máx Y (m):", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#374151").pack(side="left")
-        self.entry_max_y = tk.Entry(l3_frame, width=8, font=("Segoe UI", 9), justify="center")
-        self.entry_max_y.insert(0, str(round(self.max_y, 1)))
-        self.entry_max_y.pack(side="left", padx=(2, 15))
-
-        tk.Label(l3_frame, text="ROI Mín (m):", font=("Segoe UI", 9, "bold"), bg="#ffffff", fg="#374151").pack(side="left")
-        self.entry_min_window = tk.Entry(l3_frame, width=8, font=("Segoe UI", 9), justify="center")
-        self.entry_min_window.insert(0, str(self.min_window_m))
-        self.entry_min_window.pack(side="left", padx=(2, 15))
-
-        btn_zoom_update = tk.Button(l3_frame, text="Atualizar", font=("Segoe UI", 9, "bold"), 
-                                    bg="#10b981", fg="white", relief="flat", cursor="hand2", padx=10, 
-                                    activebackground="#059669", borderwidth=0, command=self._update_arena_dimensions)
-        btn_zoom_update.pack(side="left", padx=5)
-    
     def _build_right_painel(self):
         # --- RIGHT PANEL: Metrics ---
         self.right_frame = tk.Frame(self.root, bg="white")
@@ -506,8 +567,18 @@ class KalmanApp:
         if self.processing: return
         
         try:
+            self.duration = float(self.entry_duration.get())
+            self.video_fps = int(self.entry_fps.get()) 
+            self.min_window_m = float(self.entry_min_window.get())
+
+            self.seed_value = int(self.entry_seed.get())
             self._parse_config()
             self.P_matrizes = []
+            
+        except ValueError:
+            self.root.after(0, lambda: messagebox.showerror("Erro de Valor", "Certifique-se de inserir apenas números válidos no Tempo, FPS e ROI."))
+            self.processing = False
+            return
         except Exception as e:
             error_msg = traceback.format_exc()
             self.root.after(0, lambda: messagebox.showerror("Erro", f"Erro nas configurações: {error_msg}"))
@@ -523,17 +594,37 @@ class KalmanApp:
         self.worker = threading.Thread(target=self._simulate_ekf_tracking, daemon=True)
         self.worker.start()
 
+        # Habilita algorítmo de autosintonia
+        self.autotune_btn.config(state="normal")
+
+    def autotuning_processing(self):
+        ''' Implementação do processamento para autosintonização do filtro de Kalman'''
+        pass 
+
+
+
     def _simulate_ekf_tracking(self):
         """Simulação rápida. Salva os frames no HD e não atualiza gráficos durante o loop."""
         out = None
         try:
+            # Garanto a injeção da seed para reprodutibilidade
+            import random
+            if hasattr(self, 'seed_value') and self.seed_value != 0:
+                # Trava a aleatoriedade para gerar sempre a mesma trajetória e o mesmo ruído de sensor
+                np.random.seed(self.seed_value)
+                random.seed(self.seed_value)
+            else:
+                # O usuário colocou '0', então permitimos total aleatoriedade (cada EXEC será único)
+                np.random.seed(None)
+                random.seed(None)
+
             # --- CAPTURA SEGURA DA NOVA OPÇÃO DE DEBUG PARA A THREAD ---
             show_kalman_traj_cache = self.show_kalman_traj.get() if hasattr(self, 'show_kalman_traj') else True
 
             dt = 1.0 / self.video_fps
             gen = TrajectoryGenerator(dt, self.towers)
             tipo_traj = self.traj_var.get()
-            duracao = 40
+            duracao = self.duration
 
             if tipo_traj == "Círculo":
                 raio = float(self.traj_params["raio"].get())
@@ -578,7 +669,9 @@ class KalmanApp:
                 mask = np.ones(len(t), dtype=bool)
 
             self.total_frames = len(t)
-            
+
+            self.root.after(0, lambda: self.sim_progress.config(maximum=self.total_frames, value=0))
+
             # --- INICIALIZAÇÃO DE HISTÓRICOS E CONTADORES DE TAXAS ---
             self.P_matrizes = [] 
             self.total_measurements = 0
@@ -627,18 +720,41 @@ class KalmanApp:
                     if meas_x is not None and meas_y is not None:
                         innov_x = meas_x - pred_x
                         innov_y = meas_y - pred_y
+                        innov_vec = np.array([innov_x, innov_y])
 
                         if hasattr(ekf, 'P') and ekf.P is not None:
-                            P_pred = ekf.P
-                            std_x_pred = np.sqrt(max(1e-6, P_pred[0, 0]))
-                            std_y_pred = np.sqrt(max(1e-6, P_pred[1, 1]))
-                            
-                            limite_x = max(getattr(self, 'min_window_m', 0), 3 * std_x_pred)
-                            limite_y = max(getattr(self, 'min_window_m', 0), 3 * std_y_pred)
-                            
-                            if (abs(innov_x) <= limite_x) and (abs(innov_y) <= limite_y):
-                                self.meas_inside_roi += 1
+                            # 1. Extrai a submatriz 2x2 de covariância de X e Y (Posição)
+                            P_xy = ekf.P[0:2, 0:2].copy()
 
+                            # 2. Garante o ROI mínimo (min_window_m) convertendo-o para variância
+                            # Se o usuário pediu janela de 0.3m (0.1m de std dev considerando 3 sigma)
+                            min_window = getattr(self, 'min_window_m', 0)
+                            min_var = (min_window / 3.0) ** 2 if min_window > 0 else 1e-6
+                            
+                            # Adiciona a variância mínima à diagonal principal para estabilidade
+                            P_xy[0, 0] = max(P_xy[0, 0], min_var)
+                            P_xy[1, 1] = max(P_xy[1, 1], min_var)
+
+                            try:
+                                # 3. Inversão segura da matriz de covariância
+                                try:
+                                    inv_P_xy = np.linalg.inv(P_xy)
+                                except np.linalg.LinAlgError:
+                                    # Fallback caso a matriz P fique singular (determinante = 0)
+                                    inv_P_xy = np.linalg.pinv(P_xy)
+
+                                # 4. Distância de Mahalanobis ao quadrado (Forma Quadrática: e^T * P^-1 * e)
+                                dist_quad = innov_vec.T @ inv_P_xy @ innov_vec
+
+                                # 5. Validação da Crença: O erro está dentro da elipse de confiança de 3 sigmas?
+                                # (Em 2 graus de liberdade, o limite da distribuição qui-quadrado para ~98.9% é 9.0)
+                                limit_chi2 = 9.0 
+                                
+                                if dist_quad <= limit_chi2:
+                                    self.meas_inside_roi += 1
+                                    
+                            except Exception:
+                                pass 
                     # Executa a atualização do estado
                     ekf.update(raw_z)
 
@@ -724,8 +840,10 @@ class KalmanApp:
                 out.write(frame)
 
                 if i % 20 == 0:
-                    # Usa de forma isolada a label de progresso de frames (status_lbl) sem tocar em nis_lbl
-                    self.root.after(0, lambda idx=i: self.status_lbl.config(text=f"Processando frame {idx}/{self.total_frames}..."))
+                    self.root.after(0, lambda idx=i: [
+                        self.status_lbl.config(text=f"Status: Processando"),
+                        self.sim_progress.config(value=idx)
+                    ])
 
             self.processed_video_path = output_path
 
@@ -740,6 +858,9 @@ class KalmanApp:
             else:
                 self.inlier_rate = 100.0
 
+            # Preenche a barra em 100% ao terminar com sucesso
+            self.root.after(0, lambda: self.sim_progress.config(value=self.total_frames))
+
         except Exception as e:
             msg = traceback.format_exc()
             self.root.after(0, lambda: messagebox.showerror("Erro na Simulação", msg))
@@ -748,6 +869,8 @@ class KalmanApp:
             if out is not None:
                 out.release()
             # Esta chamada agora receberá a estrutura preenchida e interpretará o NIS sem interferências
+            # Ajusta o status final no fechamento
+            self.root.after(0, lambda: self.status_lbl.config(text="Status: Concluído."))
             self.root.after(0, self._update_ui_metrics_and_complete)
 
     def save_results(self):
@@ -1246,7 +1369,7 @@ class KalmanApp:
 
     def _on_processing_complete(self):
         """Finaliza os cálculos e abre o vídeo salvo para reprodução."""
-        self.status_lbl.config(text=f"Status: Concluído | Detecção: {self.inlier_rate:.1f}%")
+        self.status_lbl.config(text=f"Status: Concluído")
         self.exec_btn.config(state="normal")
         
         if hasattr(self, 'load_btn'):
@@ -1324,9 +1447,76 @@ class KalmanApp:
                 current_str = self._format_time(self.current_frame_idx / fps)
                 total_str = self._format_time(self.total_frames / fps)
                 self.time_info_lbl.config(text=f"{current_str} / {total_str}")
+
+                self._draw_canvas_slider()
                 
                 self._update_metrics_ui()
-                self._update_plots_ui()
+                if self.current_frame_idx % 2 == 0:
+                    self._update_plots_ui()
+
+
+    def _draw_canvas_slider(self, event=None):
+        """Desenha a barra de progresso customizada com fundo azul e agulha circular."""
+        if not hasattr(self, 'video_progress_canvas'): return
+        
+        self.video_progress_canvas.delete("all")
+        w = self.video_progress_canvas.winfo_width()
+        h = self.video_progress_canvas.winfo_height()
+        
+        if w < 20: return
+        
+        # Calcula a porcentagem do vídeo já exibida
+        pct = 0.0
+        if hasattr(self, 'total_frames') and self.total_frames > 1:
+            pct = self.current_frame_idx / (self.total_frames - 1)
+            
+        track_y = h // 2
+        
+        # 1. Barra de fundo (cinza claro)
+        self.video_progress_canvas.create_line(10, track_y, w - 10, track_y, fill="#d1d5db", width=6, capstyle=tk.ROUND)
+        
+        # 2. Barra de progresso (Preenchimento Azul)
+        fill_x = 10 + (w - 20) * pct
+        if fill_x > 10:
+            self.video_progress_canvas.create_line(10, track_y, fill_x, track_y, fill="#3b82f6", width=6, capstyle=tk.ROUND)
+            
+        # 3. A "Agulha" (Círculo azul escuro com borda branca)
+        r = 7 # Raio do círculo
+        self.video_progress_canvas.create_oval(fill_x - r, track_y - r, fill_x + r, track_y + r, 
+                                               fill="#2563eb", outline="#ffffff", width=2)
+
+    def _on_canvas_click(self, event):
+        """Pula para o frame correspondente ao local clicado na barra."""
+        self._update_frame_from_canvas(event.x)
+        
+    def _on_canvas_drag(self, event):
+        """Permite arrastar a agulha para navegar no vídeo suavemente (Scrubbing)."""
+        self._update_frame_from_canvas(event.x)
+        
+    def _update_frame_from_canvas(self, x):
+        """Converte a posição horizontal do mouse em índice de frame e atualiza a tela."""
+        # Se não há vídeo carregado, ignora
+        if not hasattr(self, 'total_frames') or self.total_frames <= 1 or getattr(self, 'cap', None) is None:
+            return
+            
+        w = self.video_progress_canvas.winfo_width()
+        
+        # Limita as coordenadas para o mouse não sair visualmente da barra
+        x_seguro = max(10, min(w - 10, x))
+        pct = (x_seguro - 10) / (w - 20)
+        
+        new_idx = int(pct * (self.total_frames - 1))
+        
+        # Atualiza apenas se mudou de frame para evitar engasgos
+        if new_idx != self.current_frame_idx:
+            self.current_frame_idx = new_idx
+            
+            # Se o vídeo estiver tocando, ele pausa automaticamente para você arrastar em paz
+            if self.playing:
+                self.toggle_playback()
+                
+            # Força a interface a mostrar a imagem atualizada no exato momento
+            self._display_current_frame()
 
     def _poll_playback(self):
         """O Loop que mantém o vídeo rodando no tempo certo (FPS)."""
@@ -1363,44 +1553,6 @@ class KalmanApp:
         # Inverte o eixo Y para o OpenCV
         py = int(self.video_height - (y_m * (self.video_height / self.max_y)))
         return px, py
-
-    def _update_arena_dimensions(self):
-        """Atualiza os valores de zoom e a escala em tempo real baseando-se nos inputs do usuário."""
-        try:
-            # Coleta os valores digitados
-            novo_max_x = float(self.entry_max_x.get().strip())
-            novo_max_y = float(self.entry_max_y.get().strip())
-            novo_min_win = float(self.entry_min_window.get().strip())
-            
-            # Atualiza variáveis de classe
-            self.max_x = novo_max_x 
-            self.max_y = novo_max_y * self.aspect_ratio
-            self.min_window_m = novo_min_win
-            
-            # Recalcula a nova escala
-            px_m_x = self.video_width / self.max_x if self.max_x > 0 else 1.0
-            px_m_y = self.video_height / self.max_y if self.max_y > 0 else 1.0
-            avg_scale_px_m = (px_m_x + px_m_y) / 2.0
-            
-            # Recalcula a estimativa de erro de px baseado na nova escala
-            try:
-                erro_metros = float(self.detector_noise_entry.get().strip())
-            except Exception:
-                erro_metros = 1.0
-            erro_px = erro_metros * avg_scale_px_m
-            
-            # Atualiza os labels de informações
-            self.escala_lbl.config(text=f"🔎 Escala: {avg_scale_px_m:.2f} px/m")
-            self.erro_sensor_lbl.config(text=f"⚡ Erro Distância Simulado: {erro_metros:.2f} m ≈ {erro_px:.2f} px")
-            
-            print(f"Zoom atualizado: Max X={self.max_x}m, Max Y={self.max_y}m, ROI={self.min_window_m}m")
-            
-            # Opcional: Se você estiver parado em um frame (pausado), pode querer chamar 
-            # sua função que renderiza o frame atual aqui, para que o zoom aplique imediatamente na tela.
-            # ex: self.update_frame_display() 
-            
-        except ValueError:
-            print("Erro: Insira apenas valores numéricos válidos nos campos de Zoom.")
 
 def run_app():
     root = tk.Tk()

@@ -25,7 +25,7 @@ class VideoViewer(tk.Frame):
         self.width = width
         self.height = height
         
-        # Main label for display
+        # Main label for display taking all available space
         self.label = tk.Label(self, bg=bg)
         self.label.pack(expand=True, fill="both")
         
@@ -74,6 +74,11 @@ class VideoViewer(tk.Frame):
             Resized image with letterboxing (numpy array in RGB)
         """
         h, w = cv_image.shape[:2]
+        
+        # Prevenção contra divisão por zero em casos de inicialização anômala
+        if h == 0 or w == 0 or target_w == 0 or target_h == 0:
+            return cv_image
+
         scale = min(target_w / w, target_h / h)
         new_w = int(w * scale)
         new_h = int(h * scale)
@@ -90,4 +95,3 @@ class VideoViewer(tk.Frame):
         canvas[y_offset:y_offset+new_h, x_offset:x_offset+new_w] = resized
         
         return canvas
-
