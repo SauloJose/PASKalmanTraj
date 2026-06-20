@@ -601,8 +601,6 @@ class KalmanApp:
         ''' Implementação do processamento para autosintonização do filtro de Kalman'''
         pass 
 
-
-
     def _simulate_ekf_tracking(self):
         """Simulação rápida. Salva os frames no HD e não atualiza gráficos durante o loop."""
         out = None
@@ -610,11 +608,9 @@ class KalmanApp:
             # Garanto a injeção da seed para reprodutibilidade
             import random
             if hasattr(self, 'seed_value') and self.seed_value != 0:
-                # Trava a aleatoriedade para gerar sempre a mesma trajetória e o mesmo ruído de sensor
                 np.random.seed(self.seed_value)
                 random.seed(self.seed_value)
             else:
-                # O usuário colocou '0', então permitimos total aleatoriedade (cada EXEC será único)
                 np.random.seed(None)
                 random.seed(None)
 
@@ -898,8 +894,14 @@ class KalmanApp:
 
             from matplotlib.figure import Figure
 
+            # Variáveis de controle de tamanho de fonte para fácil alteração
+            T_TITLE = 16
+            T_LABEL = 14
+            T_LEGEND = 12
+            T_TICKS = 12
+
             # ===== GRÁFICO 1: TRAJETÓRIA ESPACIAL =====
-            fig1 = Figure(figsize=(12, 8), tight_layout=True, dpi=150)
+            fig1 = Figure(figsize=(12, 12), tight_layout=True, dpi=150)
             ax1 = fig1.add_subplot(111)
             
             xs_gt = [p[0] for p in self.metrics.ground_truth_pts]
@@ -916,10 +918,11 @@ class KalmanApp:
                 ax1.plot(xs_det, ys_det, "r.", label="Pontos de Detecção (Com Ruído)", markersize=9, alpha=0.6)
             ax1.plot(xs_filt, ys_filt, "b-", label="Kalman Filtrado", linewidth=2.0, alpha=0.9)
             
-            ax1.set_xlabel("Posição X (metros)", fontweight="bold")
-            ax1.set_ylabel("Posição Y (metros)", fontweight="bold")
-            ax1.set_title(f"Trajetória Espacial - {self.traj_var.get()}", fontweight="bold")
-            ax1.legend()
+            ax1.set_xlabel("Posição X (metros)", fontweight="bold", fontsize=T_LABEL)
+            ax1.set_ylabel("Posição Y (metros)", fontweight="bold", fontsize=T_LABEL)
+            ax1.set_title(f"Trajetória Espacial - {self.traj_var.get()}", fontweight="bold", fontsize=T_TITLE)
+            ax1.legend(fontsize=T_LEGEND)
+            ax1.tick_params(axis='both', labelsize=T_TICKS)
             ax1.grid(True, alpha=0.3, linestyle="--")
             fig1.savefig(f"{save_dir}/{video_name}_1_traj.png")
 
@@ -942,10 +945,11 @@ class KalmanApp:
                     if conv_idx_y is not None:
                         ax2.axvline(conv_idx_y, color='orange', linestyle=':', alpha=0.7, label=f"Conv. Y: {conv_idx_y/self.video_fps:.2f}s")
                         
-            ax2.set_xlabel("Frames", fontweight="bold")
-            ax2.set_ylabel("Erro RMS Acumulado (metros)", fontweight="bold")
-            ax2.set_title("Evolução do Erro RMS", fontweight="bold")
-            ax2.legend()
+            ax2.set_xlabel("Frames", fontweight="bold", fontsize=T_LABEL)
+            ax2.set_ylabel("Erro RMS Acumulado (metros)", fontweight="bold", fontsize=T_LABEL)
+            ax2.set_title("Evolução do Erro RMS", fontweight="bold", fontsize=T_TITLE)
+            ax2.legend(fontsize=T_LEGEND)
+            ax2.tick_params(axis='both', labelsize=T_TICKS)
             ax2.grid(True, alpha=0.3, linestyle="--")
             fig2.savefig(f"{save_dir}/{video_name}_2_rms.png")
 
@@ -955,9 +959,11 @@ class KalmanApp:
             ax3.scatter(signed_dx, signed_dy, alpha=0.5, c='purple', edgecolors='k', s=20)
             ax3.axhline(0, color='black', linewidth=1, linestyle='-')
             ax3.axvline(0, color='black', linewidth=1, linestyle='-')
-            ax3.set_xlabel("Erro X (m)", fontweight="bold")
-            ax3.set_ylabel("Erro Y (m)", fontweight="bold")
-            ax3.set_title("Dispersão dos Erros de Estimação (Assinados)", fontweight="bold")
+            
+            ax3.set_xlabel("Erro X (m)", fontweight="bold", fontsize=T_LABEL)
+            ax3.set_ylabel("Erro Y (m)", fontweight="bold", fontsize=T_LABEL)
+            ax3.set_title("Dispersão dos Erros de Estimação (Assinados)", fontweight="bold", fontsize=T_TITLE)
+            ax3.tick_params(axis='both', labelsize=T_TICKS)
             ax3.grid(True, alpha=0.3, linestyle="--")
             
             # Força eixos simétricos ao redor do zero para melhor leitura visual
@@ -993,13 +999,14 @@ class KalmanApp:
                 # Ajusta o teto visual para não deixar picos isolados esmagarem o gráfico
                 teto_visual = float(np.percentile(valid_nis, 95) * 2.0)
                 ax4.set_ylim(0, max(chi2_limit * 1.5, teto_visual))
-                ax4.legend()
+                ax4.legend(fontsize=T_LEGEND)
             else:
-                ax4.text(0.5, 0.5, 'Cálculo de NIS Indisponível no histórico', ha='center', va='center', transform=ax4.transAxes, color='red', fontsize=12)
+                ax4.text(0.5, 0.5, 'Cálculo de NIS Indisponível no histórico', ha='center', va='center', transform=ax4.transAxes, color='red', fontsize=T_TITLE)
                 
-            ax4.set_xlabel("Frames", fontweight="bold")
-            ax4.set_ylabel("Valor NIS", fontweight="bold")
-            ax4.set_title(f"Teste de Consistência NIS (Inovação Normalizada - Esperado ~{esp_nis})", fontweight="bold")
+            ax4.set_xlabel("Frames", fontweight="bold", fontsize=T_LABEL)
+            ax4.set_ylabel("Valor NIS", fontweight="bold", fontsize=T_LABEL)
+            ax4.set_title(f"Teste de Consistência NIS (Inovação Normalizada - Esperado ~{esp_nis})", fontweight="bold", fontsize=T_TITLE)
+            ax4.tick_params(axis='both', labelsize=T_TICKS)
             ax4.grid(True, alpha=0.3, linestyle="--")
             fig4.savefig(f"{save_dir}/{video_name}_4_nis.png")
 
@@ -1008,10 +1015,12 @@ class KalmanApp:
             ax5 = fig5.add_subplot(111)
             ax5.hist(signed_dx, bins=30, alpha=0.5, color='blue', label='Erros X (m)', edgecolor='black', linewidth=0.5)
             ax5.hist(signed_dy, bins=30, alpha=0.5, color='orange', label='Erros Y (m)', edgecolor='black', linewidth=0.5)
-            ax5.set_xlabel("Erro (metros)", fontweight="bold")
-            ax5.set_ylabel("Frequência", fontweight="bold")
-            ax5.set_title("Histograma dos Erros de Estado", fontweight="bold")
-            ax5.legend()
+            
+            ax5.set_xlabel("Erro (metros)", fontweight="bold", fontsize=T_LABEL)
+            ax5.set_ylabel("Frequência", fontweight="bold", fontsize=T_LABEL)
+            ax5.set_title("Histograma dos Erros de Estado", fontweight="bold", fontsize=T_TITLE)
+            ax5.legend(fontsize=T_LEGEND)
+            ax5.tick_params(axis='both', labelsize=T_TICKS)
             ax5.grid(True, alpha=0.3, linestyle="--")
             fig5.savefig(f"{save_dir}/{video_name}_5_hist.png")
 
@@ -1040,7 +1049,7 @@ class KalmanApp:
             txt_path = f"{save_dir}/{video_name}_metrics.txt"
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write("====================================================\n")
-                f.write("       RESUMO DE MÉTRICAS - FILTRO DE KALMAN EKF     \n")
+                f.write("        RESUMO DE MÉTRICAS - FILTRO DE KALMAN EKF     \n")
                 f.write("====================================================\n\n")
                 f.write(f"Cenário Sintético: {self.traj_var.get()}\n")
                 f.write(f"Data da Análise: {time.strftime('%d/%m/%Y %H:%M:%S')}\n")
@@ -1453,7 +1462,6 @@ class KalmanApp:
                 self._update_metrics_ui()
                 if self.current_frame_idx % 2 == 0:
                     self._update_plots_ui()
-
 
     def _draw_canvas_slider(self, event=None):
         """Desenha a barra de progresso customizada com fundo azul e agulha circular."""
