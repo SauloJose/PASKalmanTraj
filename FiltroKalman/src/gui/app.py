@@ -59,6 +59,9 @@ class KalmanApp:
         self.detection_rate = 0.0  
         self.meas_inside_roi = 0 
 
+        self.nis_bom = 0
+        self.nis_pessimista = 0
+        self.nis_otimista = 0
 
         self.metrics = MetricsManager()
 
@@ -692,6 +695,8 @@ class KalmanApp:
                 cv2.circle(arena_base, (px, py), 8, (0, 165, 255), -1)
                 cv2.putText(arena_base, f"B{i+1}", (px+10, py-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
 
+
+
             # --- LOOP PRINCIPAL ---
             for i in range(self.total_frames):
                 if not self.processing:
@@ -699,62 +704,40 @@ class KalmanApp:
 
                 gt_x, gt_y = states[i, 0], states[i, 1]
                 
-                # Predição a priori para obter inovação teórica
+                # Predição a priori para obter o estado predito
                 ekf.predict()
                 pred_x, pred_y = ekf.get_position()
 
                 raw_z = None
                 nis_atual = np.nan
-                meas_x, meas_y = None, None
+
+            
 
                 if mask[i]:
-                    raw_z = world.measure_distances(gt_x, gt_y)
+                    # --- 1. MÉTRICA DEMONSTRATIVA (Erro Real vs Matriz P) ---
+                    if hasattr(ekf, 'P') and ekf.P is not None:
+                        P_xy = ekf.P[0:2, 0:2].copy()
+                        err_vec = np.array([pred_x - gt_x, pred_y - gt_y])
+                        
+                        try:
+                            inv_P_xy = np.linalg.inv(P_xy)
+                            dist_quad_gt = err_vec.T @ inv_P_xy @ err_vec
+                            
+                            # Limite Qui-Quadrado para 2 DoF (X, Y) com 99.73% (3 sigmas para exibição visual)
+                            if dist_quad_gt <= 11.83:
+                                self.meas_inside_roi += 1 
+                        except np.linalg.LinAlgError:
+                            pass
+
+                    # Medição real: vetor 4x1 com as distâncias às 4 torres
+                    raw_z = world.measure_distances(gt_x, gt_y) 
                     self.total_measurements += 1
                     meas_x, meas_y = world.multilaterate(raw_z)
-
-                    # --- AVALIAÇÃO DA INOVAÇÃO COMO MÉTRICA DE DESEMPENHO ---
-                    if meas_x is not None and meas_y is not None:
-                        innov_x = meas_x - pred_x
-                        innov_y = meas_y - pred_y
-                        innov_vec = np.array([innov_x, innov_y])
-
-                        if hasattr(ekf, 'P') and ekf.P is not None:
-                            # 1. Extrai a submatriz 2x2 de covariância de X e Y (Posição)
-                            P_xy = ekf.P[0:2, 0:2].copy()
-
-                            # 2. Garante o ROI mínimo (min_window_m) convertendo-o para variância
-                            # Se o usuário pediu janela de 0.3m (0.1m de std dev considerando 3 sigma)
-                            min_window = getattr(self, 'min_window_m', 0)
-                            min_var = (min_window / 3.0) ** 2 if min_window > 0 else 1e-6
-                            
-                            # Adiciona a variância mínima à diagonal principal para estabilidade
-                            P_xy[0, 0] = max(P_xy[0, 0], min_var)
-                            P_xy[1, 1] = max(P_xy[1, 1], min_var)
-
-                            try:
-                                # 3. Inversão segura da matriz de covariância
-                                try:
-                                    inv_P_xy = np.linalg.inv(P_xy)
-                                except np.linalg.LinAlgError:
-                                    # Fallback caso a matriz P fique singular (determinante = 0)
-                                    inv_P_xy = np.linalg.pinv(P_xy)
-
-                                # 4. Distância de Mahalanobis ao quadrado (Forma Quadrática: e^T * P^-1 * e)
-                                dist_quad = innov_vec.T @ inv_P_xy @ innov_vec
-
-                                # 5. Validação da Crença: O erro está dentro da elipse de confiança de 3 sigmas?
-                                # (Em 2 graus de liberdade, o limite da distribuição qui-quadrado para ~98.9% é 9.0)
-                                limit_chi2 = 9.0 
-                                
-                                if dist_quad <= limit_chi2:
-                                    self.meas_inside_roi += 1
-                                    
-                            except Exception:
-                                pass 
                     # Executa a atualização do estado
                     ekf.update(raw_z)
 
-                    # Cálculo seguro do NIS pós-update baseado nos resíduos do filtro
+                    
+                    # --- 2. MÉTRICA NIS COM INTERVALO DE CONFIANÇA DE 95% (4 DoF) ---
                     if hasattr(ekf, 'S') and hasattr(ekf, 'y') and ekf.S is not None and ekf.y is not None:
                         try:
                             try:
@@ -762,10 +745,23 @@ class KalmanApp:
                             except np.linalg.LinAlgError:
                                 invS = np.linalg.pinv(ekf.S)
                             
+                            # NIS = y^T * S^-1 * y
                             nis_matriz = ekf.y.T @ invS @ ekf.y
                             nis_atual = float(nis_matriz.item())
+                            
+                            # Limites críticos para Chi-Square (DoF=4, Confiança=95%)
+                            limite_inferior = 0.484
+                            limite_superior = 11.143
+                            
+                            if nis_atual < limite_inferior:
+                                self.nis_pessimista += 1  # Modelo superestima o erro (S está muito alta)
+                            elif nis_atual > limite_superior:
+                                self.nis_otimista += 1    # Modelo subestima o erro (S está muito baixa / Outlier)
+                            else:
+                                self.nis_bom += 1         # Filtro Estatisticamente Saudável
+                                
                         except Exception:
-                            nis_atual = np.nan
+                            pass
 
                 est_x, est_y = ekf.get_position()
                 P_mat_atual = ekf.P if hasattr(ekf, 'P') else None
@@ -980,26 +976,35 @@ class KalmanApp:
             # Filtra os índices válidos correspondentes para o eixo X
             frames_nis = [idx for idx, val in enumerate(self.metrics.nis_vals) if not np.isnan(val) and not np.isinf(val)]
             
-            # Limite Chi-Quadrado dinâmico baseado na quantidade de torres (Ex: 4 torres = 4 graus de liberdade)
+            # Definição do intervalo de confiança bicaudal (95%) baseado nos graus de liberdade
             num_towers = len(self.towers) if hasattr(self, 'towers') else 4
             if num_towers == 4:
-                chi2_limit = 9.488   # 4 DOF @ 95%
+                chi2_lower = 0.484   # 4 DOF @ 2.5%
+                chi2_upper = 11.143  # 4 DOF @ 97.5%
                 esp_nis = "4.0"
             elif num_towers == 3:
-                chi2_limit = 7.815   # 3 DOF @ 95%
+                chi2_lower = 0.216   # 3 DOF @ 2.5%
+                chi2_upper = 9.348   # 3 DOF @ 97.5%
                 esp_nis = "3.0"
             else:
-                chi2_limit = 5.991   # 2 DOF @ 95% (padrão se for apenas posição X e Y puras)
+                chi2_lower = 0.051   # 2 DOF @ 2.5%
+                chi2_upper = 7.378   # 2 DOF @ 97.5%
                 esp_nis = "2.0"
             
             if valid_nis:
                 ax4.plot(frames_nis, valid_nis, color='#16a34a', alpha=0.8, linewidth=1.5, label="NIS Calculado")
-                ax4.axhline(chi2_limit, color='r', linestyle='--', linewidth=2, label=f"Limite 95% Confiança (χ²={chi2_limit})")
                 
-                # Ajusta o teto visual para não deixar picos isolados esmagarem o gráfico
-                teto_visual = float(np.percentile(valid_nis, 95) * 2.0)
-                ax4.set_ylim(0, max(chi2_limit * 1.5, teto_visual))
-                ax4.legend(fontsize=T_LEGEND)
+                # Linhas de limites superior e inferior
+                ax4.axhline(chi2_upper, color='red', linestyle='--', linewidth=1.5, label=f"Limite Sup 97.5% ({chi2_upper})")
+                ax4.axhline(chi2_lower, color='orange', linestyle='--', linewidth=1.5, label=f"Limite Inf 2.5% ({chi2_lower})")
+                
+                # Preenchimento visual da área aceitável (Bom)
+                ax4.axhspan(chi2_lower, chi2_upper, color='green', alpha=0.08, label="Filtro Consistente (95%)")
+                
+                # Ajusta o teto visual dinamicamente sem achatar o gráfico por picos isolados
+                teto_visual = float(np.percentile(valid_nis, 95) * 1.8) if len(valid_nis) > 0 else chi2_upper * 1.5
+                ax4.set_ylim(0, max(chi2_upper * 1.6, teto_visual))
+                ax4.legend(fontsize=T_LEGEND, loc='upper right')
             else:
                 ax4.text(0.5, 0.5, 'Cálculo de NIS Indisponível no histórico', ha='center', va='center', transform=ax4.transAxes, color='red', fontsize=T_TITLE)
                 
@@ -1035,8 +1040,11 @@ class KalmanApp:
             max_err_x = np.max(np.abs(signed_dx)) if signed_dx else 0.0
             max_err_y = np.max(np.abs(signed_dy)) if signed_dy else 0.0
 
-            nis_above_95 = sum(1 for n in valid_nis if n > chi2_limit)
-            nis_pct_above = (nis_above_95 / len(valid_nis)) * 100 if valid_nis else 0.0
+            # Atualização da contagem bicaudal para o relatório
+            nis_below_lower = sum(1 for n in valid_nis if n < chi2_lower)
+            nis_above_upper = sum(1 for n in valid_nis if n > chi2_upper)
+            nis_pct_below = (nis_below_lower / len(valid_nis)) * 100 if valid_nis else 0.0
+            nis_pct_above = (nis_above_upper / len(valid_nis)) * 100 if valid_nis else 0.0
 
             conv_time_x, conv_time_y = None, None
             if hasattr(self, '_find_convergence_frame'):
@@ -1091,12 +1099,13 @@ class KalmanApp:
                     f.write("RMS Y não atingiu convergência.\n")
                 f.write("(Critério: erro RMS <= 5% do valor final por 10 frames consecutivos)\n\n")
 
-                f.write("--- AVALIAÇÃO DE CONSISTÊNCIA (NIS) ---\n")
+                f.write("--- AVALIAÇÃO DE CONSISTÊNCIA (NIS) BICAUDAL (95%) ---\n")
                 f.write(f"NIS Médio (ideal ≈ {esp_nis} devido a {num_towers} Torres/DOF): {mean_nis_val:.4f}\n")
-                f.write(f"Percentual acima do limite de 95% ({chi2_limit}): {nis_pct_above:.2f}%\n")
+                f.write(f"Percentual abaixo do limite de 2.5% ({chi2_lower}): {nis_pct_below:.2f}% (Superestimando erro/Pessimista)\n")
+                f.write(f"Percentual acima do limite de 97.5% ({chi2_upper}): {nis_pct_above:.2f}% (Subestimando erro/Otimista)\n")
                 f.write(" * Nota: O NIS avalia se a matriz de covariância (P) reflete de forma fidedigna\n")
-                f.write("   a real incerteza do modelo. Uma percentagem muito acima de ~5% além do limite\n")
-                f.write("   indica subestimação do ruído ou divergência do filtro.\n\n")
+                f.write("   a real incerteza do modelo. Em um filtro perfeitamente calibrado estatisticamente,\n")
+                f.write("   espera-se que aproximadamente ~2.5% dos pontos caiam abaixo e ~2.5% caiam acima dos limites.\n\n")
                 f.write("====================================================\n")
 
             # ========== EXPORTAÇÃO DOS DADOS BRUTOS EM CSV ==========
@@ -1125,9 +1134,9 @@ class KalmanApp:
             messagebox.showinfo("Sucesso", f"Análise completa e relatórios exportados com sucesso para:\n{save_dir}/")
 
         except Exception as e:
+            import traceback
             error_msg = traceback.format_exc()
             self.root.after(0, lambda: messagebox.showerror("Erro", f"Erro ao gerar relatórios: {error_msg}"))
-
     def _update_metrics_ui(self):
         """Atualiza as métricas exibidas durante o playback (frame a frame)."""
         if not hasattr(self, 'metrics') or not self.metrics.ground_truth_pts:

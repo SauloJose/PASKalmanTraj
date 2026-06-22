@@ -24,10 +24,9 @@ class ChartsDashboard:
         # ==========================================
         rms_frame = tk.LabelFrame(self.right_frame, text="RMS dos Erros (X e Y)", 
                                   font=("Segoe UI", 10, "bold"), bg="white", fg="#333333",
-                                  padx=4, pady=4, borderwidth=1, relief="solid")
+                                  padx=4, borderwidth=1, relief="solid")
         rms_frame.pack(fill="both", expand=True, pady=(0, 4))
         
-        # Adicionado: Label explicativa do RMS
         rms_desc = tk.Label(rms_frame, text="Mede a precisão acumulada: RMSE = √(Σ e² / N). Menores valores indicam maior exatidão.",
                             font=desc_font, fg=desc_color, bg="white", justify="left", anchor="w", wraplength=380)
         rms_desc.pack(fill="x", side="top", pady=(0, 2))
@@ -49,10 +48,9 @@ class ChartsDashboard:
         # 2. Histograma Frame (Esquerda)
         hist_frame = tk.LabelFrame(middle_container, text="Histograma", 
                                   font=("Segoe UI", 9, "bold"), bg="white", fg="#333333",
-                                  padx=2, pady=2, borderwidth=1, relief="solid")
+                                  padx=2, borderwidth=1, relief="solid")
         hist_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 2))
         
-        # Adicionado: Label explicativa do Histograma
         hist_desc = tk.Label(hist_frame, text="Frequência dos resíduos. Espera-se perfil Gaussiano centrado em zero.",
                              font=desc_font, fg=desc_color, bg="white", justify="left", anchor="w", wraplength=180)
         hist_desc.pack(fill="x", side="top", pady=(0, 2))
@@ -66,10 +64,9 @@ class ChartsDashboard:
         # 3. Scatter Frame / Dispersão (Direita)
         scatter_frame = tk.LabelFrame(middle_container, text="Dispersão", 
                                   font=("Segoe UI", 9, "bold"), bg="white", fg="#333333",
-                                  padx=2, pady=2, borderwidth=1, relief="solid")
+                                  padx=2, borderwidth=1, relief="solid")
         scatter_frame.grid(row=0, column=1, sticky="nsew", padx=(2, 0))
         
-        # Adicionado: Label explicativa da Dispersão
         scatter_desc = tk.Label(scatter_frame, text="Erros em 2D. Revela tendências espaciais ou desalinhamentos.",
                                 font=desc_font, fg=desc_color, bg="white", justify="left", anchor="w", wraplength=180)
         scatter_desc.pack(fill="x", side="top", pady=(0, 2))
@@ -85,15 +82,14 @@ class ChartsDashboard:
         # ==========================================
         nis_frame = tk.LabelFrame(self.right_frame, text="Histórico de Atualização do NIS", 
                                   font=("Segoe UI", 10, "bold"), bg="white", fg="#333333",
-                                  padx=4, pady=4, borderwidth=1, relief="solid")
+                                  padx=4, borderwidth=1, relief="solid")
         nis_frame.pack(fill="both", expand=True, pady=(0, 0))
         
-        # Adicionado: Label explicativa do NIS
-        nis_desc = tk.Label(nis_frame, text="Consistência do Filtro: NIS = νᵀ S⁻¹ ν. Pontos acima do limite vermelho indicam subestimação de incerteza.",
+        nis_desc = tk.Label(nis_frame, text="Consistência (95%): NIS = νᵀ S⁻¹ ν. Manter dentro da faixa verde é o ideal. Fora indica erro super/subestimado.",
                             font=desc_font, fg=desc_color, bg="white", justify="left", anchor="w", wraplength=380)
         nis_desc.pack(fill="x", side="top", pady=(0, 0))
         
-        self.nis_fig = Figure(figsize=(4.2, 1.6), tight_layout=True, facecolor="white")
+        self.nis_fig = Figure(figsize=(4.2, 2.2), tight_layout=True, facecolor="white")
         self.nis_ax = self.nis_fig.add_subplot(111)
         self._style_ax(self.nis_ax)
         self.nis_canvas = FigureCanvasTkAgg(self.nis_fig, master=nis_frame)
@@ -162,7 +158,7 @@ class ChartsDashboard:
             self.scatter_ax.set_ylim(-max_err * 1.2, max_err * 1.2)
 
         # =========================================================================
-        # 4. ATUALIZAÇÃO DO NIS (Alterado para STEM PLOT)
+        # 4. ATUALIZAÇÃO DO NIS (Alterado para Intervalo Mínimo e Máximo)
         # =========================================================================
         self.nis_ax.clear()
         self._style_ax(self.nis_ax)
@@ -176,32 +172,41 @@ class ChartsDashboard:
             yf = [nis_data[i] for i in indices_validos]
             
             if yf:
-                # --- MODIFICAÇÃO AQUI: Uso do stem ---
-                # Criamos o plot e capturamos os componentes para estilização
-                # Usamos plt.setp (set property) que é mais eficiente no OO
                 markerline, stemlines, baseline = self.nis_ax.stem(xf, yf)
 
-                # Estilização profissional do Stem (Verde #16a34a)
-                # 1. Marcadores (as bolinhas no topo): Pequenas e opacas
+                # Estilização do Stem (Verde #16a34a)
                 plt.setp(markerline, marker='o', markersize=3, color='#16a34a', alpha=0.8, label='NIS')
-                
-                # 2. Hastes (linhas verticais): Finas e semi-transparentes para não poluir
                 plt.setp(stemlines, color='#16a34a', linewidth=0.8, alpha=0.4)
-                
-                # 3. Linha de base (no y=0): Ocultamos para limpar o visual, já que o eixo X já existe
                 plt.setp(baseline, visible=False)
                 
-                # Linha de referência padrão para 4 Torres (Limite Chi-Quadrado 95% = 9.488)
-                chi2_limit = 9.488
-                self.nis_ax.axhline(chi2_limit, color='red', linestyle='--', linewidth=1.0, alpha=0.7, label=f'Lim. 95% ({chi2_limit})')
+                # [ALTERADO] Identificação dinâmica de DoF e definição dos limites Bicaudais (95%)
+                num_towers = getattr(metrics, 'num_towers', 4)
+                if num_towers == 4:
+                    chi2_lower = 0.484
+                    chi2_upper = 11.143
+                elif num_towers == 3:
+                    chi2_lower = 0.216
+                    chi2_upper = 9.348
+                else:
+                    chi2_lower = 0.051
+                    chi2_upper = 7.378
+                
+                # Adiciona as duas linhas de referência (mínima e máxima)
+                self.nis_ax.axhline(chi2_upper, color='red', linestyle='--', linewidth=1.0, alpha=0.8, label=f'Sup 97.5% ({chi2_upper})')
+                self.nis_ax.axhline(chi2_lower, color='orange', linestyle='--', linewidth=1.0, alpha=0.8, label=f'Inf 2.5% ({chi2_lower})')
+                
+                # Adiciona a faixa preenchida verde representando a área de consistência ideal
+                self.nis_ax.axhspan(chi2_lower, chi2_upper, color='green', alpha=0.06, label='Consistente')
                 
                 self.nis_ax.set_xlabel("Frame", fontsize=8)
                 self.nis_ax.set_ylabel("Valor NIS", fontsize=8)
-                self.nis_ax.legend(loc='upper right', fontsize=7, facecolor="#f5f5f5", edgecolor="#999999")
+                self.nis_ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.35),                ncol=2, 
+                                   fontsize=7, facecolor="#f5f5f5", edgecolor="#999999", 
+                                   framealpha=0.9)
                 
-                # Ajuste de limite dinâmico para evitar picos esmagando a escala do gráfico
-                teto_visual = float(np.percentile(yf, 95) * 1.8) if len(yf) > 10 else chi2_limit * 1.5
-                self.nis_ax.set_ylim(0, max(chi2_limit * 1.5, teto_visual))
+                # Ajuste de limite dinâmico com base no limite superior para evitar achatamento visual por picos
+                teto_visual = float(np.percentile(yf, 95) * 1.8) if len(yf) > 10 else chi2_upper * 1.5
+                self.nis_ax.set_ylim(0, max(chi2_upper * 1.6, teto_visual))
                 self.nis_ax.set_xlim(0, max(30, upto_idx * 1.02))
 
         # 5. Redesenha tudo de forma otimizada
@@ -215,8 +220,5 @@ class ChartsDashboard:
         if not metrics or not metrics.sqerr_x:
             return
             
-        # O índice máximo é o tamanho total das listas de erro geradas
         total_frames = len(metrics.sqerr_x)
-        
-        # Reaproveita a sua própria função de atualização, passando o limite máximo
         self.update_dashboard(metrics, total_frames)
