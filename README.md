@@ -51,7 +51,7 @@ A arquitetura do projeto está dividida de forma modular para facilitar a manute
 
 ## 💡 Inspiração
 
-Este projeto é uma evolução e melhoria de uma interface que desenvolvi anteriormente. Você pode conferir a versão original [clicando aqui](https://www.google.com/search?q=INSIRA_O_LINK_AQUI).
+Este projeto é baseado em outro projeto que desenvolvi como meu TCC, onde foi reutilizado muitas informações para criar a interface atual. O código do EKF e os demais são inovações. [clicando aqui](https://github.com/SauloJose/vsss-system).
 
 ---
 
