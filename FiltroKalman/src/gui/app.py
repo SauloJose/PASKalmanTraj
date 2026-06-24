@@ -625,6 +625,7 @@ class KalmanApp:
             tipo_traj = self.traj_var.get()
             duracao = self.duration
 
+            # Dada a trajetória, gero os GROUND TRUTHS
             if tipo_traj == "Círculo":
                 raio = float(self.traj_params["raio"].get())
                 vel = float(self.traj_params["velocidade"].get())
@@ -664,11 +665,14 @@ class KalmanApp:
                     occlusion_frames=frames_occ
                 )
             else:
+                #por default, faço o círculo, mas é em caso de erro.
                 t, states = gen.generate_circle(25, (self.max_x / 2, self.max_y / 2), 3.0, duracao)
                 mask = np.ones(len(t), dtype=bool)
 
+            # Puxo os frames apenas para utilizar nos cálculos
             self.total_frames = len(t)
 
+            # Aqui é apenas para o widget que é a barra de progresso, é puramente visuaç
             self.root.after(0, lambda: self.sim_progress.config(maximum=self.total_frames, value=0))
 
             # --- INICIALIZAÇÃO DE HISTÓRICOS E CONTADORES DE TAXAS ---
@@ -676,12 +680,16 @@ class KalmanApp:
             self.total_measurements = 0
             self.meas_inside_roi = 0
 
+            # Modelagem das entidades para realizar os cálculos. Lembrando que o world dará as medições com o ruído escolhidp
+            # e o ekf é a entidade que calcula internamente seu EKF.
             world = World(self.towers, noise_std=self.config_detector_noise_m)
             ekf = Entidy(dt, self.towers, q_diag=self.config_Q, r_diag=self.config_R)
-            ekf.initialize(states[0, 0], states[0, 1])
+            ekf.initialize(states[0, 0], states[0, 1]) #inicializo apenas com as posições x e y, nesse caso reais.
 
+            # Apago as métricas anteriores, para poder reutilizar nessa simulação
             self.metrics.clear()
 
+            # Aqui eu crio um caminho e um arquivo .mp4 que o OpenCV irá desenhar a animação que será exibida no viewer
             os.makedirs("FiltroKalman/src/data", exist_ok=True)
             output_path = "FiltroKalman/src/data/simulacao_arena.mp4"
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -689,6 +697,7 @@ class KalmanApp:
             fps_value = float(self.video_fps) if self.video_fps > 0 else 30.0
             out = cv2.VideoWriter(output_path, fourcc, fps_value, (self.video_width, self.video_height))
 
+            # Arena base aqui é justamente uma imagem vazia, uma matriz video_height x video_width x 3 pixels, 3 pq é o canal RGB
             arena_base = np.zeros((self.video_height, self.video_width, 3), dtype=np.uint8)
             for i, (bx, by) in enumerate(self.towers):
                 px, py = self.m_to_px(bx, by)
@@ -696,25 +705,27 @@ class KalmanApp:
                 cv2.putText(arena_base, f"B{i+1}", (px+10, py-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
 
 
-
-            # --- LOOP PRINCIPAL ---
+            # --- LOOP PRINCIPAL --- (Aqui que acontece o fluxo do programa do simulador!)
             for i in range(self.total_frames):
                 if not self.processing:
                     break
-
+                
+                # Puxo os valores de Graund Truth (Ou seja, os valores reais das trajetórias, que foram gerados no começo, sem ruídos)
                 gt_x, gt_y = states[i, 0], states[i, 1]
                 
-                # Predição a priori para obter o estado predito
+                ## Dado o modelo interno do EKF eu faço uma predição inicial da posição dele
+                # ETAPA 1: PREDIÇÃO
                 ekf.predict()
                 pred_x, pred_y = ekf.get_position()
 
+                # Aqui são apenas variáveis vazias para salvar os valores de Z e NIS para serem exibidos posteriormente
                 raw_z = None
                 nis_atual = np.nan
-
-            
-
+                
+                # Essa "mask[i]" é uma estratégia para que eu posssa em alguns loops ignorar as medições, que é o caso da oclusão
+                # Foi uma gambiarra que funcionou...
                 if mask[i]:
-                    # --- 1. MÉTRICA DEMONSTRATIVA (Erro Real vs Matriz P) ---
+                    # --- 1. MÉTRICA DEMONSTRATIVA (Erro Real vs Matriz P) --- TAXA DE INLIERS
                     if hasattr(ekf, 'P') and ekf.P is not None:
                         P_xy = ekf.P[0:2, 0:2].copy()
                         err_vec = np.array([pred_x - gt_x, pred_y - gt_y])
@@ -732,8 +743,14 @@ class KalmanApp:
                     # Medição real: vetor 4x1 com as distâncias às 4 torres
                     raw_z = world.measure_distances(gt_x, gt_y) 
                     self.total_measurements += 1
+
+                    # Aqui faço a multilateração, que aplica um mínimos quadrados nas leituras de Z para encontrar o valor mais próvavel para 
+                    # x e y.
                     meas_x, meas_y = world.multilaterate(raw_z)
-                    # Executa a atualização do estado
+
+
+                    # Agora que eu tenho as informações das medições atuais, eu atualizo o ekf para a etapa de CORREÇÃO.
+                    # ETAPA 2 : CORREÇÃO DO EKF
                     ekf.update(raw_z)
 
                     
@@ -745,7 +762,7 @@ class KalmanApp:
                             except np.linalg.LinAlgError:
                                 invS = np.linalg.pinv(ekf.S)
                             
-                            # NIS = y^T * S^-1 * y
+                            # NIS = y^T * S^-1 * y => y é o erro de inovação, calculado internamente na classe.
                             nis_matriz = ekf.y.T @ invS @ ekf.y
                             nis_atual = float(nis_matriz.item())
                             
@@ -753,6 +770,8 @@ class KalmanApp:
                             limite_inferior = 0.484
                             limite_superior = 11.143
                             
+                            # Aqui uso a métrica para verificar se o valor do NIS está dentro do esperado
+                            # para o caso SINTONIZADO das matrículas.
                             if nis_atual < limite_inferior:
                                 self.nis_pessimista += 1  # Modelo superestima o erro (S está muito alta)
                             elif nis_atual > limite_superior:
@@ -762,23 +781,36 @@ class KalmanApp:
                                 
                         except Exception:
                             pass
-
+                
+                ## OBS: Daqui em diante é apenas para cálculo de métricas e atualização de gráficos.
                 est_x, est_y = ekf.get_position()
                 P_mat_atual = ekf.P if hasattr(ekf, 'P') else None
                 
-                # --- SALVAR MATRIZES P (DESVIOS DO ESTADO POSTERIORI) ---
+                # --- SALVAR MATRIZES P (DESVIOS DO ESTADO POSTERIORI) --- Como explicado no artigo
                 if P_mat_atual is not None:
+                    # Pego os dps para x e y, contudo, tem que se levar em consideração que pode haver correlação entre x e y.
+                    # Aqui é mais para poder criar a ROI móvel, a janela de interesse.
                     std_x = np.sqrt(max(1e-6, P_mat_atual[0, 0]))
                     std_y = np.sqrt(max(1e-6, P_mat_atual[1, 1]))
                 else:
                     std_x, std_y = 0.0, 0.0
+
+                # Salvo em P_matrizes para utilizar futuramente.
                 self.P_matrizes.append([std_x, std_y])
 
                 # Adiciona o NIS calculado diretamente na estrutura central de métricas
-                self.metrics.push_frame(gt_x, gt_y, est_x, est_y, meas_x=meas_x, meas_y=meas_y, nis_val=nis_atual, raw_z=raw_z, P_mat=P_mat_atual)
+                # As métricas são calculadas numa classe separada para ser mais fácil de visualizar o que estou fazendo
+                # passo a passo.
+                self.metrics.push_frame(gt_x, gt_y, 
+                                        est_x, est_y, 
+                                        meas_x=meas_x, meas_y=meas_y, 
+                                        nis_val=nis_atual, 
+                                        raw_z=raw_z, 
+                                        P_mat=P_mat_atual)
 
                 frame = arena_base.copy()
 
+                # Aqui são exibições na imagem/frame, caso a opção na interface tenha sido escolhida.
                 if self.show_traj_cache:
                     for pt in self.metrics.ground_truth_pts:
                         cv2.circle(frame, self.m_to_px(pt[0], pt[1]), 2, (0, 255, 0), -1)
@@ -788,8 +820,11 @@ class KalmanApp:
                         if pt is not None:
                             cv2.circle(frame, self.m_to_px(pt[0], pt[1]), 2, (255, 0, 0), -1)
 
+                # Aqui é uma conversão de m para pixels, pois, os indices da imagem e as coordenadas (X,Y) 
+                # seguem direções diferentes, então é necessário a conversão
                 px_gt, py_gt = self.m_to_px(gt_x, gt_y)
 
+                # Exibir as distâncias medidas pelas torres acima das linhas que vão até o objeto.
                 if self.show_detect_cache and mask[i]:
                     for j, (bx, by) in enumerate(self.towers):
                         px_b, py_b = self.m_to_px(bx, by)
@@ -803,15 +838,17 @@ class KalmanApp:
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 200, 255), 1, cv2.LINE_AA)
 
 
-
+                # Uma lógica de que se estiver na oclusão, eu não desenho a detecção na imagem
                 if mask[i]:
                     cv2.circle(frame, (px_gt, py_gt), 3, (0, 255, 0), -1)
                 else:
                     cv2.circle(frame, (px_gt, py_gt), 3, (0, 0, 100), -1)
 
+                # Aqui eu ploto a estimativa do filtro de Kalman
                 if self.show_kalman_cache:
                     cv2.circle(frame, self.m_to_px(est_x, est_y), 3, (255, 0, 0), -1)
                 
+                # Aqui é a janela, o ROI dinâmico. O desenho só é feito caso tenha sido escolhido e eu tenha valores na P.
                 if self.show_window_cache and P_mat_atual is not None:
                     try:
                         win_x_m = max(self.min_window_m, std_x * 3)
@@ -828,18 +865,22 @@ class KalmanApp:
                         cv2.rectangle(frame, (x1, y1), (x2, y2), (147, 51, 234), 2) 
                     except:
                         pass
-
+                
+                # Após eu ter feito esse processo, eu desenho o frame no arquivo com o OpenCV
                 out.write(frame)
 
+                # Para evitar travar tudo, já que roda na thread principal, eu tomo um intervalo de 20 frames.
                 if i % 20 == 0:
                     self.root.after(0, lambda idx=i: [
                         self.status_lbl.config(text=f"Status: Processando"),
                         self.sim_progress.config(value=idx)
                     ])
 
+            # Salvo o caminho do vídeo processado para reutilizar futuramente
             self.processed_video_path = output_path
 
             # --- ATUALIZAÇÃO DINÂMICA DAS METRICAS REAIS OBTIDAS ---
+            # Mensuração e atualização das métricas para visualizar na interface.
             if self.total_frames > 0:
                 self.detection_rate = (self.total_measurements / self.total_frames) * 100.0
             else:
@@ -880,14 +921,19 @@ class KalmanApp:
             os.makedirs(save_dir, exist_ok=True)
 
             # ========== Preparação de dados via MetricsManager ==========
+            # puxo todos os dx e dy para salvar os dados.
             signed_dx, signed_dy = self.metrics.get_signed_errors()
             valid_nis = [n for n in self.metrics.nis_vals if not np.isnan(n) and not np.isinf(n)]
 
+            # Erros quadráticos da classe métricas
             sx = np.array([v for v in self.metrics.sqerr_x if not np.isnan(v)])
             sy = np.array([v for v in self.metrics.sqerr_y if not np.isnan(v)])
+
+            # Realizo agora uma operação no vetor todo, utilizando o numpy, para ter o RMSE para x e y.
             run_rms_x = np.sqrt(np.cumsum(sx) / np.arange(1, sx.size + 1)) if sx.size > 0 else []
             run_rms_y = np.sqrt(np.cumsum(sy) / np.arange(1, sy.size + 1)) if sy.size > 0 else []
 
+            # Agora é o plot das figuras para salvar como arquivos.
             from matplotlib.figure import Figure
 
             # Variáveis de controle de tamanho de fonte para fácil alteração
@@ -900,6 +946,7 @@ class KalmanApp:
             fig1 = Figure(figsize=(12, 12), tight_layout=True, dpi=150)
             ax1 = fig1.add_subplot(111)
             
+            # Grounds truth
             xs_gt = [p[0] for p in self.metrics.ground_truth_pts]
             ys_gt = [p[1] for p in self.metrics.ground_truth_pts]
             xs_filt = [p[0] for p in self.metrics.filt_pts]
@@ -1054,6 +1101,7 @@ class KalmanApp:
                 conv_time_y = conv_idx_y / self.video_fps if conv_idx_y is not None else None
 
             # ========== RELATÓRIO TXT COMPLETO ==========
+            # Essa parte foi um saco. Mas é interessante.
             txt_path = f"{save_dir}/{video_name}_metrics.txt"
             with open(txt_path, "w", encoding="utf-8") as f:
                 f.write("====================================================\n")
@@ -1137,6 +1185,8 @@ class KalmanApp:
             import traceback
             error_msg = traceback.format_exc()
             self.root.after(0, lambda: messagebox.showerror("Erro", f"Erro ao gerar relatórios: {error_msg}"))
+    
+    # Métodos para atualização das métricas na interface a seguir.
     def _update_metrics_ui(self):
         """Atualiza as métricas exibidas durante o playback (frame a frame)."""
         if not hasattr(self, 'metrics') or not self.metrics.ground_truth_pts:
@@ -1283,8 +1333,13 @@ class KalmanApp:
         
         # Habilita botão de salvar e inicia exibição do vídeo
         self._on_processing_complete()
-        
+    
+
     def _find_convergence_frame(self, running_rms, final_val, tol=0.05, min_stable=10):
+        """ Esse método tem o objetivo de encontrar o tempo que o RMS chega num momento que sua variação é inferior a 5%
+        Considero que ele, nesse ponto convergiu.
+        
+        Contudo, só estou considerando a primeira vez que isso acontece."""
         if final_val is None or len(running_rms) < min_stable: return None
         threshold = final_val * (1 + tol)
         start = max(1, len(running_rms) // 5) 
@@ -1299,6 +1354,9 @@ class KalmanApp:
         - Q: Processo (6 estados do modelo PVA)
         - R: Medição (4 valores, um para cada torre)
         - Torres: Lê as coordenadas X e Y das 4 bases na UI.
+
+        Em geral, esse é um método que carrega inciialmente os valores na interface, inicializando eles para serem utilizados
+        com o passar da simulação
         """
         self.P_matrizes = []          # Cada elemento: [sqrt(P[0,0]), sqrt(P[1,1])]
         self.meas_inside_roi = 0      # Número de medições consideradas inliers
@@ -1386,7 +1444,8 @@ class KalmanApp:
         if hasattr(self, 'steady_state_lbl'): self.steady_state_lbl.config(text="T_est: -- s (--)", fg="#4b5563")
 
     def _on_processing_complete(self):
-        """Finaliza os cálculos e abre o vídeo salvo para reprodução."""
+        """Finaliza os cálculos e abre o vídeo salvo para reprodução.
+        Atualizo também a interface nos espaços corretos."""
         self.status_lbl.config(text=f"Status: Concluído")
         self.exec_btn.config(state="normal")
         
@@ -1395,6 +1454,7 @@ class KalmanApp:
 
         # === CARREGA O VÍDEO DO HD ===
         if hasattr(self, 'processed_video_path') and os.path.exists(self.processed_video_path):
+            # Finalizado o processamento, salvo o vídeo no caminho escolhido com o FPS escolhido.
             self.cap = cv2.VideoCapture(self.processed_video_path)
             self.video_fps = self.cap.get(cv2.CAP_PROP_FPS) or 30.0
             self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -1445,7 +1505,9 @@ class KalmanApp:
             self._display_current_frame()
 
     def _display_current_frame(self):
-        """Lê o frame do vídeo e atualiza as métricas de forma otimizada para não causar lag."""
+        """Lê o frame do vídeo e atualiza as métricas de forma otimizada para não causar lag.
+        
+        Aqui é uma gambiarra para poder exibir o frame e as informações utilizando um botão deslizante."""
         if not self.cap:
             return
         self.cap.set(cv2.CAP_PROP_POS_FRAMES, self.current_frame_idx)
@@ -1466,7 +1528,8 @@ class KalmanApp:
                 total_str = self._format_time(self.total_frames / fps)
                 self.time_info_lbl.config(text=f"{current_str} / {total_str}")
 
-                self._draw_canvas_slider()
+                self._draw_canvas_slider() # Gambiarra que o Gemini me mostrou para fazer esse slide. Não encontrei uma biblioteca
+                # ou projeto já para um visualizador completo... Mas está servindo.
                 
                 self._update_metrics_ui()
                 if self.current_frame_idx % 2 == 0:
@@ -1535,8 +1598,9 @@ class KalmanApp:
             # Força a interface a mostrar a imagem atualizada no exato momento
             self._display_current_frame()
 
-    def _poll_playback(self):
+    def _poll_playback(self): 
         """O Loop que mantém o vídeo rodando no tempo certo (FPS)."""
+        # O root chama esse método com uma taxa correta de atualização, isso quando clico em play.
         if self.playing and self.cap and self.current_frame_idx < self.total_frames - 1:
             self.current_frame_idx += 1
             self._display_current_frame()
@@ -1550,6 +1614,7 @@ class KalmanApp:
             self.play_btn.config(text="⏵")
 
     def toggle_playback(self):
+        # Aqui é o principal, que é chamado quando clico em executar. O root chama e exibe, até ser pausado.
         if not self.cap:
             return
         self.playing = not self.playing
@@ -1566,6 +1631,9 @@ class KalmanApp:
         A origem (0,0) em metros é o canto INFERIOR esquerdo.
         A origem (0,0) em pixels no OpenCV é o canto SUPERIOR esquerdo.
         """
+        # x (pixels) = inteiro[ (x em metros) * proporção de pixels/metros em x ] Não precisei deslocar nesse caso aqui.
+        # Agora para Y é preciso inverter.
+        # y (pixels) = inteiro[ (tamanho_máximo de pixels em y) - (y em metros * proporção pixels/metros em y)]
         px = int(x_m * (self.video_width / self.max_x))
         # Inverte o eixo Y para o OpenCV
         py = int(self.video_height - (y_m * (self.video_height / self.max_y)))

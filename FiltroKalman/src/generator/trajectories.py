@@ -24,8 +24,7 @@ class TrajectoryGenerator:
         states_gt = np.zeros((num_steps, 6))
         return t, states_gt
 
-    def generate_circle(self, radius: float, center: Tuple[float, float], 
-                        linear_velocity: float, duration: float) -> Tuple[np.ndarray, np.ndarray]:
+    def generate_circle(self, radius: float, center: Tuple[float, float],linear_velocity: float, duration: float) -> Tuple[np.ndarray, np.ndarray]:
         """
         Gera uma trajetória circular com cinemática PVA completa.
         A aceleração gerada é a aceleração centrípeta.
@@ -54,8 +53,7 @@ class TrajectoryGenerator:
         
         return t, states
 
-    def generate_square(self, side_length: float, bottom_left: Tuple[float, float], 
-                    linear_velocity: float) -> Tuple[np.ndarray, np.ndarray]:
+    def generate_square(self, side_length: float, bottom_left: Tuple[float, float], linear_velocity: float) -> Tuple[np.ndarray, np.ndarray]:
         """
         Gera uma trajetória quadrada fechada.
         O número de pontos é ajustado para que o último estado seja idêntico ao inicial.
@@ -105,8 +103,7 @@ class TrajectoryGenerator:
     
         return t, states
 
-    def generate_tanh_curve(self, start_pos: Tuple[float, float], end_pos: Tuple[float, float], 
-                            amplitude_y: float, smoothness: float, duration: float) -> Tuple[np.ndarray, np.ndarray]:
+    def generate_tanh_curve(self, start_pos: Tuple[float, float], end_pos: Tuple[float, float],amplitude_y: float, smoothness: float, duration: float) -> Tuple[np.ndarray, np.ndarray]:
         """
         Gera uma trajetória suave baseada na tangente hiperbólica (curva em S),
         semelhante a manobras de troca de faixa, com PVA completo.
@@ -150,8 +147,7 @@ class TrajectoryGenerator:
         
         return t, states
     
-    def generate_lemniscate(self, amplitude: float, center: Tuple[float, float], 
-                            linear_velocity: float, duration: float) -> Tuple[np.ndarray, np.ndarray]:
+    def generate_lemniscate(self, amplitude: float, center: Tuple[float, float],linear_velocity: float, duration: float) -> Tuple[np.ndarray, np.ndarray]:
         """
         Gera uma trajetória em forma de Lemniscata (Símbolo do Infinito/Curva de Lissajous).
         """
@@ -180,8 +176,7 @@ class TrajectoryGenerator:
         
         return t, states
 
-    def generate_random(self, start_pos: Tuple[float, float], initial_velocity: float, 
-                        noise_std: float, duration: float) -> Tuple[np.ndarray, np.ndarray]:
+    def generate_random(self, start_pos: Tuple[float, float], initial_velocity: float, noise_std: float, duration: float) -> Tuple[np.ndarray, np.ndarray]:
         """
         Gera uma trajetória onde o alvo navega em retas de no mínimo 15 metros, 
         fazendo curvas suaves para mudar de direção.
@@ -263,9 +258,7 @@ class TrajectoryGenerator:
             
         return t, states
 
-    def generate_occlusion(self, start_pos: Tuple[float, float], initial_velocity: float, 
-                           noise_std: float, duration: float, 
-                           occlusion_frames: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def generate_occlusion(self, start_pos: Tuple[float, float], initial_velocity: float, noise_std: float, duration: float,occlusion_frames: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Gera uma trajetória aleatória onde o alvo muda de direção no MÁXIMO a cada 20 metros.
         Retorna também uma máscara de visibilidade (booleana) com 4 oclusões distribuídas na trajetória.
