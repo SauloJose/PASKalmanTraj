@@ -1088,6 +1088,7 @@ class KalmanApp:
             max_err_y = np.max(np.abs(signed_dy)) if signed_dy else 0.0
 
             # Atualização da contagem bicaudal para o relatório
+            # Vejo quantos % foram superior, inferior e dentro do limite.
             nis_below_lower = sum(1 for n in valid_nis if n < chi2_lower)
             nis_above_upper = sum(1 for n in valid_nis if n > chi2_upper)
             nis_pct_below = (nis_below_lower / len(valid_nis)) * 100 if valid_nis else 0.0
@@ -1095,6 +1096,7 @@ class KalmanApp:
 
             conv_time_x, conv_time_y = None, None
             if hasattr(self, '_find_convergence_frame'):
+                # Tempos de convergência do RMSE
                 conv_idx_x = self._find_convergence_frame(run_rms_x, run_rms_x[-1] if len(run_rms_x) else None)
                 conv_idx_y = self._find_convergence_frame(run_rms_y, run_rms_y[-1] if len(run_rms_y) else None)
                 conv_time_x = conv_idx_x / self.video_fps if conv_idx_x is not None else None
